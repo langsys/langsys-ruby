@@ -1,0 +1,57 @@
+AllCops:
+  TargetRubyVersion: 3.0
+  NewCops: enable
+  SuggestExtensions: false
+
+Style/Documentation:
+  Enabled: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Metrics/MethodLength:
+  Max: 40
+
+Metrics/AbcSize:
+  Max: 40
+
+Metrics/ClassLength:
+  Max: 250
+
+Metrics/ModuleLength:
+  Max: 150
+
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
+# Some methods (refresh, close) return a boolean for parity with the other SDKs without
+# being predicates.
+Naming/PredicateMethod:
+  Enabled: false
+
+Metrics/CyclomaticComplexity:
+  Max: 15
+
+Metrics/PerceivedComplexity:
+  Max: 15
+
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*.rb"
+
+Layout/LineLength:
+  Max: 120
+
+Naming/PredicatePrefix:
+  Enabled: false
+
+Naming/AccessorMethodName:
+  Enabled: false
+
+# The ICU parser uses conventional single-letter names (i = index, ch = char, n = length).
+Naming/MethodParameterName:
+  MinNameLength: 1
+  AllowedNames:
+    - i
+    - n
+    - ch
