@@ -143,10 +143,12 @@ module Langsys
       end
 
       def apply_or_queue_block(element, item_cat, phrases, inner)
-        custom_id, block = @client.lookup_block(item_cat, phrases)
+        custom_id, block, available = @client.lookup_block(item_cat, phrases)
         if block
           Html.apply_element(element, block, @attrs)
-        else
+        elsif available
+          # WIRE-4: only queue when the catalog actually answered — a miss during an
+          # outage is not evidence the block is unregistered.
           @client.queue_content_block(inner, item_cat, custom_id, phrases)
         end
       end

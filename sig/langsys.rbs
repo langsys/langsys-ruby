@@ -12,6 +12,10 @@ module Langsys
   def self.interpolate: (String, Hash[untyped, untyped]?, ?String) -> String
   def self.icu?: (String) -> bool
   def self.generate_custom_id: (String?, Array[String]) -> String
+  def self.canonical_block_json: (String?, Array[String]) -> String
+  def self.normalize_category: (String?) -> String
+  # Accepted on lookup, never emitted (CID-3).
+  def self.legacy_custom_id: (String?, Array[String]) -> String
 
   # -- errors ---------------------------------------------------------------
 
@@ -103,8 +107,11 @@ module Langsys
     attr_accessor default_locales: Hash[String, String]
     attr_accessor key_type: String
     attr_accessor batch_limit: Integer
+    # nil when the server omitted the field — a pre-capability server (GATE-8).
+    attr_accessor write_enabled: bool?
     attr_accessor raw: Hash[String, untyped]
-    def write?: () -> bool
+    # Describes the KEY, not the session's capability. Capability is Client#can_write?.
+    def write_key_type?: () -> bool
     def self.from_response: (Hash[String, untyped]) -> Project
   end
 
@@ -142,7 +149,8 @@ module Langsys
     def authorize: (?force: bool) -> Project
     def project: () -> Project
     def key_type: () -> String
-    def can_write?: () -> bool
+    def can_write?: (?refresh: bool) -> bool
+    def write_signal: () -> bool?
 
     def locale: () -> String
     def set_locale: (String) -> void
@@ -169,7 +177,9 @@ module Langsys
     def reset_translatable_attributes: () -> Client
 
     def effective_locale: (?String?) -> String
-    def lookup_block: (String, Array[String]) -> [ String, Hash[String, untyped]? ]
+    # [custom_id, block, catalog_available] — the third element carries WIRE-4's
+    # write-storm guard: a nil block during an outage is not evidence of absence.
+    def lookup_block: (String, Array[String]) -> [ String, Hash[String, untyped]?, bool ]
     def queue_content_block: (String, String, String, Array[String]) -> untyped
 
     def countries: (?String?) -> Array[Country]

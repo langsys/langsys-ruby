@@ -35,7 +35,7 @@ module Langsys
       @logger = logger
       @http = Http.new(@config.api_url, @config.api_key, timeout: @config.timeout)
       @cache = cache || Cache::File.new
-      @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl)
+      @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl, logger: @logger)
 
       seed = Locale.canonicalize_locale(locale || @config.base_locale || "")
       if locale_source
@@ -47,6 +47,7 @@ module Langsys
       end
 
       @project = nil
+      @write_enabled = nil
       @pending = {}
       @pending_blocks = {}
       @translatable_attributes = Html::DEFAULT_TRANSLATABLE_ATTRIBUTES.dup
@@ -64,20 +65,49 @@ module Langsys
       cache_key = "auth_#{@config.project_id}"
       unless force
         cached = @cache.get(cache_key)
-        return @project = Project.from_response(cached) if cached.is_a?(Hash)
+        if cached.is_a?(Hash)
+          # A cached payload carries no decision by construction (GATE-4), so the
+          # session's capability stays unresolved until a live response supplies it.
+          return @project = Project.from_response(cached)
+        end
       end
 
       response = @http.get("authorize-project/#{Http.encode_segment(@config.project_id)}")
       data = response["data"]
       raise ConfigurationError, "Langsys: unexpected authorize-project response." unless data.is_a?(Hash)
 
-      @cache.set(cache_key, data, @config.cache_ttl)
       @project = Project.from_response(data)
+      # GATE-1: the decision is read from THIS response...
+      @write_enabled = @project.write_enabled
+      # ...and GATE-4: stripped from the artifact before it reaches any cache. The hazard
+      # is any store that is process-external or shared by default — this SDK ships a file
+      # cache with a 1h TTL, so one allow-listed request would otherwise write-enable every
+      # anonymous visitor on the host for an hour, fleet-wide on shared Redis.
+      @cache.set(cache_key, data.except("write_enabled"), @config.cache_ttl)
+      @project
     end
 
     def project = authorize
     def key_type = authorize.key_type
-    def can_write? = key_type == "write"
+
+    # GATE-1: capability is per SESSION and comes from the server. `key_type` describes
+    # the KEY — an ip_write key is read-only from most addresses and write-capable from
+    # allow-listed ones, so no client-side value can express it.
+    #
+    # +refresh:+ forces a fresh authorize, for callers that need the decision re-evaluated
+    # against the current response rather than the last one seen.
+    def can_write?(refresh: false)
+      authorize(force: true) if refresh
+      write_enabled?
+    end
+
+    # The freshest server signal, or nil when no response has carried one. Never latched
+    # and never persisted (GATE-3): both sources are overwritten on every response and
+    # neither is read back out of the cache.
+    def write_signal
+      catalog_signal = @catalog.write_enabled
+      catalog_signal.nil? ? @write_enabled : catalog_signal
+    end
 
     # -- locale ---------------------------------------------------------------
 
@@ -107,11 +137,15 @@ module Langsys
     def translate(phrase, category: nil, params: nil, locale: nil, content_block_id: nil)
       loc = effective_locale(locale)
       catalog = @catalog.get(loc)
+
+      # WIRE-4: no catalog means we cannot distinguish a miss from a hit, so we degrade to
+      # the source phrase and record NOTHING — queueing here would turn every outage into
+      # a write storm on exactly the paths that were already failing.
+      return interpolate(phrase, params, loc) if catalog.nil?
+
       result = Catalog.resolve(catalog, phrase, category, content_block_id)
       queue_missing(phrase, category) if result.missing && content_block_id.nil?
-      return Interpolate.call(result.text, params, loc) if params && !params.empty?
-
-      result.text
+      interpolate(result.text, params, loc)
     end
     alias t translate
 
@@ -249,8 +283,10 @@ module Langsys
       phrases = Html.extract_phrases(html, @translatable_attributes)
       return html if phrases.empty?
 
-      custom_id, block = lookup_block(cat_name, phrases)
+      custom_id, block, available = lookup_block(cat_name, phrases)
       return Html.apply_block_translations(html, block, @translatable_attributes) if block
+      # WIRE-4 write-storm clause: an unavailable catalog records nothing.
+      return html unless available
 
       queue_content_block(html, cat_name, custom_id, phrases)
       html
@@ -289,17 +325,24 @@ module Langsys
       # locale_source that returns "" (e.g. an unset request locale) must fall through to
       # base_locale rather than short-circuiting to authorize().
       loc = [explicit, @locale_source.get, @config.base_locale].find { |value| value && !value.empty? }
-      loc = authorize.base_locale if loc.nil? || loc.empty?
-      Locale.canonicalize_locale(loc)
+      # WIRE-4: this sits on the t() path, so a failing authorize must not surface here.
+      loc = authorize_quietly&.base_locale if loc.nil? || loc.empty?
+      Locale.canonicalize_locale(loc || "")
     end
 
     # Internal (used by the HTML page translator): look up a stored content block by its id.
+    # Returns +[custom_id, block, catalog_available]+. The third element is what lets
+    # callers honour WIRE-4's write-storm clause: a nil block during an outage is not
+    # evidence the block is unregistered.
     def lookup_block(item_cat, phrases)
       custom_id = Langsys.generate_custom_id(item_cat, phrases)
       catalog = @catalog.get(effective_locale)
+      return [custom_id, nil, false] if catalog.nil?
+
       cat = catalog[item_cat]
       block = cat.is_a?(Hash) ? cat[custom_id] : nil
-      [custom_id, block.is_a?(Hash) ? block : nil]
+      block = lookup_legacy_block(cat, item_cat, phrases) if block.nil?
+      [custom_id, block.is_a?(Hash) ? block : nil, true]
     end
 
     # Internal (used by the HTML page translator): queue a discovered content block.
@@ -311,14 +354,79 @@ module Langsys
 
     private
 
+    # Interpolation shares the client's logger so ICU-4 recovery notices surface.
+    def interpolate(text, params, loc)
+      return text unless params && !params.empty?
+
+      Interpolate.call(text, params, loc, logger: @logger)
+    end
+
+    def authorize_quietly(force: false)
+      authorize(force: force)
+    rescue Langsys::Error => e
+      @logger&.warn("langsys: authorize unavailable (#{e.class}: #{e.message}); degrading")
+      nil
+    end
+
+    # CID-3 tolerance: resolve a block stored under a historical id shape, but only after
+    # CID-4's content check. The category already matches by construction here — we are
+    # looking inside that category's bucket — so the guard compares phrases.
+    #
+    # Compared as a SET, which CID-4 explicitly permits where the representation has lost
+    # order: the catalog returns a block as a map keyed by source phrase, so order is gone
+    # before the guard can run. A set still defeats every collision mode in the rule, since
+    # all of them are collisions over differing content.
+    def lookup_legacy_block(cat, item_cat, phrases)
+      return nil unless cat.is_a?(Hash)
+
+      candidate = cat[Langsys.legacy_custom_id(item_cat, phrases)]
+      return nil unless candidate.is_a?(Hash)
+      return nil unless candidate.keys.map(&:to_s).sort == Array(phrases).map(&:to_s).sort
+
+      candidate
+    end
+
     def queue_missing(phrase, category)
       @pending[[category || UNCATEGORIZED, phrase]] = true
+    end
+
+    # GATE-1 with GATE-8's bounded fallback.
+    def write_enabled?
+      # Resolve the project first: the decision rides on the same response that carries
+      # key_type, so reading the signal before this would consult an empty slot and then
+      # fall through to the GATE-8 arm with a live answer sitting unread.
+      kind = key_type
+      signal = write_signal
+      return signal unless signal.nil?
+
+      # No live signal yet. A read-typed key cannot be write-enabled while this SDK sends
+      # no write grant — the server's gate is `type-allows-write OR valid-grant` — so we
+      # can answer without a round trip. That precondition is pinned by the GRANT
+      # non-participation spec; if it ever fails, this short-circuit must go and `read`
+      # must resolve per response like `ip_write`.
+      return false if kind == "read"
+
+      # `ip_write` is address-dependent, so it is never inferred (GATE-8 constraint 1):
+      # ask the server rather than guess.
+      if kind == "ip_write"
+        authorize_quietly(force: true)
+        signal = write_signal
+        return signal unless signal.nil?
+
+        # Still absent: a pre-capability server has no way to express an address-dependent
+        # decision, and the absence of a positive signal IS the answer.
+        return false
+      end
+
+      # GATE-8: field absent on a plain `write` key — a server predating the capability.
+      kind == "write"
     end
 
     def require_write!
       return if can_write?
 
-      raise AuthorizationError.new("Langsys: a write key is required to register phrases.", status_code: 403)
+      raise AuthorizationError.new("Langsys: the server has not write-enabled this session.",
+                                   status_code: 403)
     end
 
     def registrar

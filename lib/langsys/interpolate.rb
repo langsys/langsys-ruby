@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "date"
+require "set"
 
 module Langsys
   # Parameter interpolation with locale-aware CLDR formatting and an ICU subset.
@@ -21,6 +22,17 @@ module Langsys
     ICU_PATTERN = /\{[^{}]+,\s*(?:plural|select|selectordinal|number|date|time)\s*[,}]/
     SIMPLE_SLOT = /\{([^{},]+)\}/
     DATE_STYLES = %w[short medium long full].freeze
+    # Argument kinds that carry branches, and so can recover to `other` (ICU-1).
+    SELECTORS = %w[select plural selectordinal].freeze
+
+    # ICU-4 dedup, process-lifetime. A Set behind a mutex: `t` is called from request
+    # threads, and a duplicated notice is the failure mode the rule exists to avoid.
+    RECOVERY_NOTICES = Mutex.new
+    RECOVERY_NOTICES_SEEN = Set.new
+
+    # Render context threaded through the ICU walk. +defaulted+ collects the argument
+    # names recovered on this render, for the ICU-4 notice.
+    Ctx = Struct.new(:params, :locale, :defaulted, keyword_init: true)
 
     module_function
 
@@ -30,18 +42,41 @@ module Langsys
     end
 
     # Render +template+ against +params+ in +locale+.
-    def call(template, params, locale = "en")
+    #
+    # +logger+ enables the ICU-4 recovery notice; without one, recovery is silent (a
+    # notice that ignores the log level warns in production on every render).
+    def call(template, params, locale = "en", logger: nil)
       params ||= {}
       if icu?(template)
         begin
           nodes, = Parser.new(template).parse(0)
-          return render(nodes, params, locale, nil, 0)
+          ctx = Ctx.new(params: params, locale: locale, defaulted: [])
+          out = render(nodes, ctx, nil, 0, nil)
+          note_recovery(template, locale, ctx.defaulted, logger)
+          return out
         rescue StandardError
           # Malformed ICU (or an unexpected node) must never blow up a page.
           return simple(template, params, locale)
         end
       end
       simple(template, params, locale)
+    end
+
+    # ICU-4: name every argument that was defaulted, and the locale. Deduplicated per
+    # (template, locale) for the process lifetime — the same phrase renders thousands of
+    # times and the developer needs to learn about it once.
+    def note_recovery(template, locale, defaulted, logger)
+      return if logger.nil? || defaulted.empty?
+
+      names = defaulted.uniq
+      fresh = RECOVERY_NOTICES.synchronize { RECOVERY_NOTICES_SEEN.add?([template, locale, names]) }
+      return if fresh.nil?
+
+      logger.debug(
+        "langsys: ICU argument(s) #{names.map { |n| "{#{n}}" }.join(', ')} not supplied for locale " \
+        "#{locale}; rendered the `other` branch. A source phrase that does not ask for these is " \
+        "normal — pass them in params to select a different branch."
+      )
     end
 
     # -- simple {name} interpolation -----------------------------------------
@@ -115,50 +150,72 @@ module Langsys
 
     # -- ICU render -----------------------------------------------------------
 
-    def render(nodes, params, locale, plural_value, offset)
+    def render(nodes, ctx, plural_value, offset, hash_literal)
       nodes.map do |node|
         if node.is_a?(String)
-          apply_hash(node, plural_value, offset, locale)
+          apply_hash(node, plural_value, offset, ctx.locale, hash_literal)
         else
-          render_arg(node, params, locale)
+          render_arg(node, ctx)
         end
       end.join
     end
 
-    def apply_hash(text, plural_value, offset, locale)
-      return text if plural_value.nil? || !text.include?("#")
+    # +hash_literal+ is set only inside a *recovered* plural, where there is no count to
+    # render (ICU-3): emit the visible +{argName}+ rather than a plausible-but-false number.
+    def apply_hash(text, plural_value, offset, locale, hash_literal)
+      return text unless text.include?("#")
+      return text.gsub("#", hash_literal) if plural_value.nil? && hash_literal
+      return text if plural_value.nil?
 
       text.gsub("#", format_number(plural_value - offset, locale))
     end
 
-    def render_arg(arg, params, locale)
-      found, value = fetch_param(params, arg.name)
-      return "{#{arg.name}}" if !found || value.nil?
+    def render_arg(arg, ctx)
+      found, value = fetch_param(ctx.params, arg.name)
+      return recover(arg, ctx) if !found || value.nil?
 
       case arg.kind
-      when nil then format_value(value, locale)
-      when "number" then format_number(value, locale)
-      when "date", "time" then format_date(value, locale, arg.style || "medium")
-      when "select" then render_select(arg, value, params, locale)
-      else render_plural(arg, value, params, locale)
+      when nil then format_value(value, ctx.locale)
+      when "number" then format_number(value, ctx.locale)
+      when "date", "time" then format_date(value, ctx.locale, arg.style || "medium")
+      when "select" then render_select(arg, value, ctx)
+      else render_plural(arg, value, ctx)
       end
     end
 
-    def render_select(arg, value, params, locale)
-      branch = arg.options[value.to_s] || arg.options["other"] || []
-      render(branch, params, locale, nil, 0)
+    # ICU-1/2/3: a select/plural whose argument was not supplied (or was supplied as nil)
+    # renders its +other+ branch instead of collapsing to the raw source. Only this node is
+    # rewritten — everything else still reaches the ordinary CLDR path, which is what keeps
+    # a supplied plural selecting `few` in Polish while its neighbour recovers (ICU-5).
+    def recover(arg, ctx)
+      return "{#{arg.name}}" unless SELECTORS.include?(arg.kind)
+
+      branch = arg.options && arg.options["other"]
+      # No `other` to fall back to: malformed, so leave it to the plain-argument path
+      # rather than inventing a branch.
+      return "{#{arg.name}}" if branch.nil?
+
+      ctx.defaulted << arg.name
+      # `#` has no count inside a recovered plural; a recovered select's `#` stays literal.
+      literal = arg.kind == "select" ? nil : "{#{arg.name}}"
+      render(branch, ctx, nil, 0, literal)
     end
 
-    def render_plural(arg, value, params, locale)
+    def render_select(arg, value, ctx)
+      branch = arg.options[value.to_s] || arg.options["other"] || []
+      render(branch, ctx, nil, 0, nil)
+    end
+
+    def render_plural(arg, value, ctx)
       # Keep integers as integers — a Float 1.0 has a visible fraction digit and would
       # select CLDR "other" instead of "one".
       number = to_number(value)
       exact = arg.options["=#{int_key(number)}"]
-      return render(exact, params, locale, number, arg.offset) unless exact.nil?
+      return render(exact, ctx, number, arg.offset, nil) unless exact.nil?
 
-      category = plural_category(number - arg.offset, locale, ordinal: arg.kind == "selectordinal")
+      category = plural_category(number - arg.offset, ctx.locale, ordinal: arg.kind == "selectordinal")
       branch = arg.options[category] || arg.options["other"] || []
-      render(branch, params, locale, number, arg.offset)
+      render(branch, ctx, number, arg.offset, nil)
     end
 
     # Coerce a param to a number, preserving integer-ness (Integer stays Integer; "3" -> 3).

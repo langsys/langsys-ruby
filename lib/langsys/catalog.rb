@@ -2,6 +2,8 @@
 
 require_relative "types"
 require_relative "http"
+require_relative "errors"
+require_relative "locale"
 
 module Langsys
   # Catalog fetching (with a two-tier cache) and pure lookup logic.
@@ -49,29 +51,45 @@ module Langsys
   # in-process hash (fast, per-client); tier 2 is the pluggable cache backend (survives
   # processes). A miss falls through to nova and populates both tiers.
   class CatalogStore
-    def initialize(http, project_id, cache, ttl: 3600)
+    def initialize(http, project_id, cache, ttl: 3600, logger: nil)
       @http = http
       @project_id = project_id
       @cache = cache
       @ttl = ttl
+      @logger = logger
       @memory = {}
+      @write_enabled = nil
     end
 
+    # The write decision as of the most recent catalog response (GATE-1). +nil+ means the
+    # field was absent — a pre-capability server — which GATE-8 reads as a version signal,
+    # never as permission. Never persisted: it lives on this instance only (GATE-3).
+    attr_reader :write_enabled
+
+    # Returns the catalog, or +nil+ when it could not be fetched. The nil is load-bearing:
+    # without a catalog you cannot tell a miss from a hit, so callers must degrade and
+    # record nothing rather than treat everything as unregistered (WIRE-4's write-storm
+    # clause). Locale is normalised once here, so the wire form and the cache key agree
+    # and +en-US+/+en-us+ resolve to one entry (WIRE-3).
     def get(locale, use_cache: true)
+      loc = Locale.normalize_locale(locale)
+
       if use_cache
-        cached = @memory[locale]
+        cached = @memory[loc]
         return cached unless cached.nil?
 
-        persisted = @cache.get(key(locale))
+        persisted = @cache.get(key(loc))
         if persisted.is_a?(Hash)
-          @memory[locale] = persisted
+          @memory[loc] = persisted
           return persisted
         end
       end
 
-      catalog = fetch(locale)
-      @memory[locale] = catalog
-      @cache.set(key(locale), catalog, @ttl)
+      catalog = fetch(loc)
+      return nil if catalog.nil?
+
+      @memory[loc] = catalog
+      @cache.set(key(loc), catalog, @ttl)
       catalog
     end
 
@@ -80,8 +98,9 @@ module Langsys
         @memory.clear
         @cache.clear
       else
-        @memory.delete(locale)
-        @cache.delete(key(locale))
+        loc = Locale.normalize_locale(locale)
+        @memory.delete(loc)
+        @cache.delete(key(loc))
       end
     end
 
@@ -93,8 +112,17 @@ module Langsys
 
     def fetch(locale)
       response = @http.get("translations", { "project_id" => @project_id, "locale" => locale, "format" => "flat" })
+      # GATE-1: on this endpoint the flag sits at envelope level, beside `words`.
+      # Re-read on every response, never latched (GATE-8 constraint 2).
+      @write_enabled = response.key?("write_enabled") ? response["write_enabled"] == true : nil
       data = response["data"]
+      # GATE-4: the cached artifact is `data` only — the envelope carrying the decision
+      # is never what we hand to the cache.
       data.is_a?(Hash) ? data : {}
+    rescue Langsys::Error => e
+      @logger&.warn("langsys: catalog unavailable for #{locale} (#{e.class}: #{e.message}); " \
+                    "degrading to source text and recording nothing")
+      nil
     end
   end
 end

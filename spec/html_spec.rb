@@ -41,14 +41,14 @@ RSpec.describe "Langsys::Client HTML translation" do
   describe "#translate_content_block" do
     it "applies a stored content block" do
       custom_id = Langsys.generate_custom_id("Home", ["Welcome"])
-      stub_translations("es-ES", { "Home" => { custom_id => { "Welcome" => "Bienvenido" } } })
+      stub_translations("es-es", { "Home" => { custom_id => { "Welcome" => "Bienvenido" } } })
       client = build_client
       client.set_locale("es-ES")
       expect(client.translate_content_block("<h3>Welcome</h3>", category: "Home")).to eq("<h3>Bienvenido</h3>")
     end
 
     it "returns the original and queues an unknown block" do
-      stub_translations("es-ES", { "Home" => {} })
+      stub_translations("es-es", { "Home" => {} })
       client = build_client
       client.set_locale("es-ES")
       out = client.translate_content_block("<h3>Welcome</h3>", category: "Home")
@@ -60,7 +60,7 @@ RSpec.describe "Langsys::Client HTML translation" do
 
   describe "#translate_page" do
     it "translates the title, simple blocks, and sets html lang" do
-      stub_translations("es-ES", { Langsys::UNCATEGORIZED => { "Welcome" => "Bienvenido", "Hello" => "Hola" } })
+      stub_translations("es-es", { Langsys::UNCATEGORIZED => { "Welcome" => "Bienvenido", "Hello" => "Hola" } })
       client = build_client
       client.set_locale("es-ES")
       page = "<html><head><title>Welcome</title></head><body><h1>Hello</h1></body></html>"
@@ -72,7 +72,7 @@ RSpec.describe "Langsys::Client HTML translation" do
 
     it "honors data-langsys-category and translate=no" do
       cid = Langsys.generate_custom_id("News", ["Read more", "today"])
-      stub_translations("es-ES", {
+      stub_translations("es-es", {
                           "News" => { cid => { "Read more" => "Leer más", "today" => "hoy" } }
                         })
       client = build_client

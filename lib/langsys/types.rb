@@ -22,8 +22,10 @@ module Langsys
 
   # Project metadata returned by +authorize-project+ (the parts SDKs use).
   Project = Struct.new(:id, :title, :base_locale, :target_locales, :default_locales,
-                       :key_type, :batch_limit, :raw, keyword_init: true) do
-    def write?
+                       :key_type, :batch_limit, :write_enabled, :raw, keyword_init: true) do
+    # NB: this describes the KEY, not the session's capability. Capability is
+    # +Client#can_write?+, which branches on the server's +write_enabled+ (GATE-1).
+    def write_key_type?
       key_type == "write"
     end
 
@@ -36,8 +38,13 @@ module Langsys
         base_locale: (data["base_locale"] || "").to_s,
         target_locales: Array(data["target_locales"]),
         default_locales: data["default_locales"] || {},
-        key_type: data["key_type"] == "write" ? "write" : "read",
+        # Verbatim. Collapsing an unrecognised type to "read" is what made `ip_write`
+        # unable to register at all, and GATE-8 needs to tell `write` from `ip_write`
+        # to know which arm it may infer.
+        key_type: (data["key_type"] || "read").to_s,
         batch_limit: (items["batch_limit"] || 200).to_i,
+        # nil when the field is absent — a pre-capability server (GATE-8).
+        write_enabled: data.key?("write_enabled") ? data["write_enabled"] == true : nil,
         raw: data
       )
     end
