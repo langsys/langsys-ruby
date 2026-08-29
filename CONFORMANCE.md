@@ -150,7 +150,7 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | WIRE-3 | **implemented** | live | Live wire now carries `locale=es-es` from a client set to `es-ES`; display casing still emits `lang="es-ES"`. Cache keys unified through `Locale.normalize_locale`. |
 | WIRE-4 | **implemented** | mock | All three entry points degrade to source content instead of raising, log the degradation, and — the paired clause — **record nothing**, with a positive control proving the queue still fills when the catalog is actually available. |
 | WIRE-5 | **implemented** | live | `api_url:` is injectable and `LANGSYS_API_URL` is honoured; the live suite runs entirely through it. |
-| CONF-1 | **partial** | live | The rules that carry risk (GATE-1/3/4, WIRE-3, CID-1) are now asserted against the live server or the shared fixture. The older `client_spec`/`html_spec` request-body assertions remain. |
+| CONF-1 | **partial** | live | The rules that carry risk (GATE-1/3/4, WIRE-3, CID-1) are asserted against the live server or the shared fixture. The older `client_spec`/`html_spec` request-body assertions remain — **known residue, routed to the program's E2E wave**, where live-assertion infrastructure is the focus. Deliberately not converted here. |
 | CONF-2 | **implemented** | — | Every row carries a graded tier, and rows resting on mocked transport say so rather than claiming `live`. |
 | CONF-3 | not implemented | none | No mutation proofs yet. |
 
@@ -170,14 +170,27 @@ read-typed — is sound **only while this SDK sends no grant**. If grant support
 shortcut must stop short-circuiting and resolve per request like `ip_write`. The test is what
 makes the shortcut's precondition falsifiable instead of remembered.
 
+## On GATE-8 and the two meanings of absence
+
+`write_enabled` can be absent for two different reasons: a pre-capability server omitted
+it, or GATE-4 stripped it from a payload this SDK cached itself. This implementation
+applies the fallback to **both**, for `read` and plain `write` keys only, and **never** for
+`ip_write` — which pays a live authorize instead when the cache is warm.
+
+That asymmetry is deliberate. It is safe for plain keys because the server invariant holds
+`write_enabled ≡ key_type` for them, and it is unsafe for `ip_write` by definition, because
+the decision is address-dependent and no cached payload can express it. Confirmed as the
+fleet reading rather than assumed locally; the underlying ambiguity in the rule text is
+queued for a clarifying sentence in the next spec batch.
+
 ## Gaps, ranked by cost
 
 Ranked by what the gap costs, not by rule order. Everything the wave brief scoped is
 closed; what remains was out of scope or has no test pointing at it.
 
-1. **REG-2/REG-3/REG-7/REG-8** — no debounce, no end-of-context flush, no in-flight guard, no backoff. **Latency and delivery**: discovery works, but a long-lived process registers later than it should and a failing server is retried immediately. The largest remaining cluster.
+1. **REG-2/REG-3/REG-7/REG-8** — no debounce, no end-of-context flush, no in-flight guard, no backoff. **Latency and delivery**: discovery works, but a long-lived process registers later than it should and a failing server is retried immediately. The largest remaining cluster, and **deferred by the program to a dedicated server-core REG hardening wave** (Ruby + Python + JS Server) after the fleet's first pass — deferred, not browser-weighted.
 2. **GATE-5** — bookkeeping still records attempts rather than confirmed acceptance. **Correctness under failure**: a rejected registration can be treated as done.
-3. **CONF-1 residue** — `client_spec` and `html_spec` still assert on request bodies. **Evidence quality**, not behaviour.
+3. **CONF-1 residue** — `client_spec` and `html_spec` still assert on request bodies. **Evidence quality**, not behaviour. Owned by the E2E wave.
 4. **REG-11** — no ellipsis warning. **Diagnostics.**
 5. **GATE-2, REG-6/REG-10/REG-12, CAT-3, WIRE-2** — believed satisfied, no test points at them. `provisional (no test)` is a fact about this SDK, not a documentation gap.
 
