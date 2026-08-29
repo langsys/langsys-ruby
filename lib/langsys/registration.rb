@@ -39,16 +39,34 @@ module Langsys
     Digest::MD5.hexdigest(canonical_block_json(category, phrases))
   end
 
-  # A historical id shape: PHP's pipe-join over category-plus-phrases. **Accepted on
-  # lookup, never emitted** (CID-3). Kept as a named function so the tolerance is
-  # greppable and so nothing reimplements it from a description.
+  # Historical id shapes: the pipe-join over category-plus-phrases. **Accepted on lookup,
+  # never emitted** (CID-3). Named functions so the tolerance is greppable and so nothing
+  # reimplements it from a description.
+  #
+  # An uncategorised block has **two** spellings, and tolerating only one is a silent
+  # miss. One old path defaulted the category to +''+ before joining; another passed the
+  # +__uncategorized__+ sentinel straight through — which is what the shipping PHP SDK
+  # writes by default, and what this SDK's own pre-wave HTML path emitted. Miss it and the
+  # block re-registers under the canonical id, machine translation refills it, the page
+  # still looks right, and the human translations are orphaned on the old id. That is the
+  # failure class CID-3 exists for, and it stayed invisible for eight days the last time.
+  #
+  # Returned most-likely-first and de-duplicated, mirroring PHP's +legacyCustomIds+.
   #
   # This space is not injective — an unescaped delimiter loses the field boundary, so
   # category +"UI|Buy now"+ with no phrases collides with category +"UI"+ and phrase
-  # +"Buy now"+ — which is why a match must be content-verified before it is attached
-  # to (CID-4), and why stored rows are never re-keyed.
-  def self.legacy_custom_id(category, phrases)
-    Digest::MD5.hexdigest([normalize_category(category), *Array(phrases)].join("|"))
+  # +"Buy now"+ — which is why a match must be content-verified before it is attached to
+  # (CID-4), and why stored rows are never re-keyed.
+  def self.legacy_custom_ids(category, phrases)
+    values = Array(phrases)
+    slots =
+      if category.nil? || category.empty? || category == UNCATEGORIZED
+        ["", UNCATEGORIZED]
+      else
+        [category.to_s]
+      end
+
+    slots.map { |slot| Digest::MD5.hexdigest([slot, *values].join("|")) }.uniq
   end
 
   # Posts translatable items to nova. The caller is responsible for write-key gating.

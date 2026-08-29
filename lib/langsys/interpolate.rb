@@ -69,7 +69,11 @@ module Langsys
       return if logger.nil? || defaulted.empty?
 
       names = defaulted.uniq
-      fresh = RECOVERY_NOTICES.synchronize { RECOVERY_NOTICES_SEEN.add?([template, locale, names]) }
+      # Keyed on the (template, locale) PAIR, matching PHP and JS. Including the argument
+      # names would be finer-grained and therefore chattier: the same phrase rendered with
+      # different subsets of params missing would notify once per subset, where the fleet
+      # notifies once. Cross-SDK same-behaviour governs over local preference.
+      fresh = RECOVERY_NOTICES.synchronize { RECOVERY_NOTICES_SEEN.add?([template, locale]) }
       return if fresh.nil?
 
       logger.debug(

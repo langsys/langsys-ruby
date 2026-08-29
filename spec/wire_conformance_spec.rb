@@ -135,11 +135,9 @@ RSpec.describe "WIRE conformance" do
     # case-insensitively: HTTP header names are case-insensitive, and a guard that
     # catches one casing is a guard someone walks past by accident.
     #
-    # This is not decorative. The server gate is `type-allows-write OR valid-grant`, so
-    # a grant can make a read key write-enabled — which means any read-key short-circuit
-    # in the write decision is sound ONLY while no grant is sent. If this test ever
-    # fails, grant support has landed: stop short-circuiting read keys in
-    # Client#write_enabled? and resolve per response like ip_write.
+    # The removal condition lives in the failure message rather than here: a comment is
+    # read by whoever opens this file, and the person who needs it is whoever is staring
+    # at a red build having just added grant support.
     it "never sends an X-Write-Grant header on any request" do
       sent = []
       client = build_client
@@ -150,7 +148,15 @@ RSpec.describe "WIRE conformance" do
         orig.call(req, *args)
       end
       client.t("Save", category: "UI")
-      expect(sent.select { |h| h.downcase.include?("write-grant") }).to be_empty
+
+      removal_condition =
+        "Grant support has landed — remove the read-key short-circuit in " \
+        "Client#write_enabled? and resolve `read` per response like `ip_write`. " \
+        "The server gate is `type-allows-write OR valid-grant`, so a grant can make a " \
+        "read key write-enabled and the short-circuit is no longer sound."
+
+      expect(sent.select { |h| h.downcase.include?("write-grant") })
+        .to be_empty, removal_condition
     end
 
     it "would catch a grant header if one were ever sent (matcher control)" do

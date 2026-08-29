@@ -7,7 +7,7 @@
 | **specVersion** | 7 |
 | **Spec revision read** | git `origin/main` `fabe22b2a54a06a6c7957b0ad06c52cc1274a4b5`, blob `docs/sdk-spec.mdx` `06ae105a0a1f7b5245ec32929f0b3885c63f0336`, fetched 2026-08-29T18:28:29Z |
 | **SDK revision** | `feature/838_write_key_gating`, cut from `main` `27a2381` (the repo's only prior commit) |
-| **Suite** | 155 unit examples in 12 files + 5 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below |
+| **Suite** | 163 unit examples in 12 files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
 | **Status** | Wave 4 delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
 
 > **Per-rule revisions are not recorded and the omission is deliberate.** The template requires a
@@ -58,10 +58,11 @@ which is its own evidence of how little it takes to trigger.
 
 ## What surfaced during the wave itself
 
-**The GATE atomicity risk was real in the code, not just on paper.** Implementing GATE-1
-first produced a client that read `write_enabled` while `authorize` still cached it — the
-exact half-landed state the intake warned about. It existed for one edit. The fix and the
-read landed in the same change, which is the only reason it was never a committed state.
+**The GATE atomicity risk is real in the code, not just on paper.** The two halves are
+one commit here, and the reason is checkable rather than historical: remove the
+`except("write_enabled")` from the authorize cache write and `gate_conformance`'s
+GATE-3/4 block goes red, including the example where a second client on a shared warm
+cache inherits the first's decision. That is the file-cache leak, reproduced in seconds.
 
 **One ordering bug the tests caught and code review would not have.** The first
 `write_enabled?` read the decision slot *before* `authorize` had populated it, so a live
@@ -117,7 +118,7 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | CAT-1 | provisional | mock | `spec/catalog_spec.rb` "marks an absent key as missing" / "falls back to the source phrase for present-but-empty/null (not missing)" — presence, not truthiness. |
 | CAT-2 | provisional | mock | `spec/client_spec.rb` "does not re-queue a present-but-null phrase". |
 | CAT-3 | provisional (no test) | none | `spec/catalog_spec.rb` "resolves a phrase inside a content block" exercises the hit path; object-vs-null is not asserted. |
-| REG-1 | provisional | mock | `spec/client_spec.rb` "drops the queue on a read key without writing" / "requires a write key". **Gated on `key_type`, so it is right by accident** — it will need re-proving once GATE-1 lands. |
+| REG-1 | **implemented** | live | `flush_pending` and `require_write!` both gate on `can_write?`, which is now the server's decision rather than `key_type`. `gate_conformance` proves the gate governs the POST in both directions; the live read-key arm proves refusal against the real server. |
 | REG-2 | not implemented | none | No debounce; `flush_pending` is caller-driven. |
 | REG-3 | not implemented | none | No end-of-context flush hook. |
 | REG-4 | n/a (profile: browser) | none | No page teardown exists. |
@@ -134,11 +135,11 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | ICU-1 | **implemented** | mock | `icu_conformance` ICU-1 block (3), incl. a malformed node with no `other` branch degrading rather than inventing one. |
 | ICU-2 | **implemented** | mock | `icu_conformance` ICU-2 block (3), incl. an explicit assertion that nil does not render as `0`. |
 | ICU-3 | **implemented** | mock | `icu_conformance` ICU-3 block (5): recursive recovery two levels down, `#` emitting `{argName}`, and a supplied argument still rendering inside a recovered branch. |
-| ICU-4 | **implemented** | mock | `icu_conformance` ICU-4 block (5): names every defaulted argument and the locale, fires for plural and select, silent without a logger, deduped per (template, locale), and notifies again for a different locale. |
-| ICU-5 | **implemented** | mock | The discriminating Polish guard (3) landed and was green **before** any recovery work, and still is; plus 3 mixed-node examples proving recovery rewrites only the missing node. |
+| ICU-4 | **implemented** | mock | `icu_conformance` ICU-4 block (5): names every defaulted argument and the locale, fires for plural and select, silent without a logger, deduped on the **(template, locale) pair** matching PHP and JS, and notifies again for a different locale. |
+| ICU-5 | **implemented** | mock | The discriminating Polish guard (3): `few` at n=3, `many` at n=5, `one` at n=1, distinct branch text. Its power is **provable by mutation** — degrading the renderer to one/other turns these red — which is the falsifiable claim; plus 3 mixed-node examples proving recovery rewrites only the missing node. |
 | CID-1 | **implemented** | contract | `cid_conformance` — 13/13 hash **and** 13/13 `serialized_hex` bytes, asserted through the same function the id is hashed from. Plus explicit slash / non-ASCII / raw-U+2028 / UTF-8-bytes / order-sensitivity cases. |
 | CID-2 | **implemented** | contract | Both halves: the function coalesces `nil` **and** the `__uncategorized__` sentinel to `''`, and a caller-level example proves the content-block path (which passes the sentinel) hashes as `''`. |
-| CID-3 | **implemented** | mock | Legacy pipe-join ids resolve on lookup, the canonical id is preferred when both exist, and only the canonical id is ever emitted. Tolerance ships in the same change as the new hash — never the id-producing half alone. |
+| CID-3 | **implemented** | mock | Both pipe-join spellings resolve — the empty-category form **and** the `__uncategorized__` sentinel form, most-likely-first and deduped, mirroring PHP's `legacyCustomIds`. Canonical id preferred when both exist; only the canonical id is ever emitted; tolerance shipped in the same change as the new hash. **The JS code-unit shape is deliberately not tolerated** — see below. |
 | CID-4 | **implemented** | mock | A legacy hit whose phrases differ is declined; positive control proves the guard still attaches when they agree. Set comparison, which CID-4 permits where the catalog has already lost order. |
 | SSR-1..3 | n/a (profile: browser) | none | — |
 | BIND-1..6 | n/a (profile: binding) | none | This is a core SDK. Binding rules bind `langsys-ruby-rails`, a separate repo. |
@@ -169,6 +170,43 @@ read-key short-circuit in the write decision — skipping re-authorization becau
 read-typed — is sound **only while this SDK sends no grant**. If grant support ever lands, that
 shortcut must stop short-circuiting and resolve per request like `ip_write`. The test is what
 makes the shortcut's precondition falsifiable instead of remembered.
+
+## GATE-3 — declared process-level posture
+
+Required by GATE-3's carve-out, which is available *only* with an explicit declaration
+rather than by default.
+
+The write decision lives on the client instance and is **never persisted**: it is stripped
+before any cache write (GATE-4) and never read back out of one. But a Ruby client object
+outlives a request under any threaded or forking server, so instance state is not
+request-scoped by accident of process death.
+
+Two things follow, and both are implemented rather than asserted:
+
+- **The decision is compared by recency, not by source.** Both slots (authorize and the
+  catalog envelope) carry a monotonic stamp and the newest wins. Fixed precedence was the
+  original implementation and it was wrong: the catalog slot is written only on a live
+  fetch and the memory tier has no TTL, so one recorded decision outranked every authorize
+  after it — reporting a closed gate as open in one direction. Both shadow directions are
+  now tested.
+- **`Client#reset_write_decision!`** drops it at a request boundary. A long-lived host
+  (Rails, Puma, Falcon) should call it per request rather than rely on process lifetime.
+  The framework wrapper is the right place to wire that, and this SDK cannot do it for
+  them — which is why it is declared here rather than assumed.
+
+## On the JS code-unit legacy shape, and why it is not tolerated here
+
+CID-3 names three historical shapes: the two PHP pipe-join variants and the JS code-unit
+hash. This SDK tolerates the two pipe variants and **not** the code-unit hash.
+
+The basis is the population, not convenience: code-unit ids were minted by published
+browser SDKs, and tolerance for them lives in the browser core's own `md5Legacy` /
+`generateLegacyCustomId` exports — which CID-3 says to *call*, not to reimplement, precisely
+because a port written from the description gets Latin-1 right and CJK, Cyrillic, Greek,
+Hebrew and Arabic wrong. The shipping PHP SDK's tolerance is pipe-only for the same reason,
+so this is fleet precedent rather than a local shortcut. Confirmed with the program rather
+than decided here; the profile split is queued as a CID-3 clarifying sentence in the next
+spec batch.
 
 ## On GATE-8 and the two meanings of absence
 

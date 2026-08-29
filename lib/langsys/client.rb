@@ -48,6 +48,7 @@ module Langsys
 
       @project = nil
       @write_enabled = nil
+      @write_enabled_at = nil
       @pending = {}
       @pending_blocks = {}
       @translatable_attributes = Html::DEFAULT_TRANSLATABLE_ATTRIBUTES.dup
@@ -79,6 +80,7 @@ module Langsys
       @project = Project.from_response(data)
       # GATE-1: the decision is read from THIS response...
       @write_enabled = @project.write_enabled
+      @write_enabled_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # ...and GATE-4: stripped from the artifact before it reaches any cache. The hazard
       # is any store that is process-external or shared by default — this SDK ships a file
       # cache with a 1h TTL, so one allow-listed request would otherwise write-enable every
@@ -101,12 +103,30 @@ module Langsys
       write_enabled?
     end
 
-    # The freshest server signal, or nil when no response has carried one. Never latched
-    # and never persisted (GATE-3): both sources are overwritten on every response and
-    # neither is read back out of the cache.
+    # The freshest server signal, or nil when no response has carried one. Never persisted
+    # (GATE-3) and never latched (GATE-8 constraint 2).
+    #
+    # Compared by recency rather than by source. Fixed precedence looks harmless and is
+    # not: the catalog slot is only written on a live fetch and the memory tier has no
+    # TTL, so a decision recorded once would outrank every authorize that followed it —
+    # and in one direction that reports a closed gate as open.
     def write_signal
       catalog_signal = @catalog.write_enabled
-      catalog_signal.nil? ? @write_enabled : catalog_signal
+      return @write_enabled if catalog_signal.nil?
+      return catalog_signal if @write_enabled.nil?
+
+      @catalog.write_enabled_at.to_f >= @write_enabled_at.to_f ? catalog_signal : @write_enabled
+    end
+
+    # Drop the session's write decision. Server SDKs outlive the request — under Puma,
+    # Falcon or any threaded server the client object survives it — so a long-lived host
+    # calls this at request boundaries rather than relying on process death. The
+    # process-level posture is declared in CONFORMANCE.md per GATE-3's carve-out.
+    def reset_write_decision!
+      @write_enabled = nil
+      @write_enabled_at = nil
+      @catalog.reset_write_decision!
+      self
     end
 
     # -- locale ---------------------------------------------------------------
@@ -379,11 +399,15 @@ module Langsys
     def lookup_legacy_block(cat, item_cat, phrases)
       return nil unless cat.is_a?(Hash)
 
-      candidate = cat[Langsys.legacy_custom_id(item_cat, phrases)]
-      return nil unless candidate.is_a?(Hash)
-      return nil unless candidate.keys.map(&:to_s).sort == Array(phrases).map(&:to_s).sort
+      wanted = Array(phrases).map(&:to_s).sort
+      Langsys.legacy_custom_ids(item_cat, phrases).each do |legacy_id|
+        candidate = cat[legacy_id]
+        next unless candidate.is_a?(Hash)
+        next unless candidate.keys.map(&:to_s).sort == wanted
 
-      candidate
+        return candidate
+      end
+      nil
     end
 
     def queue_missing(phrase, category)

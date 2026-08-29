@@ -119,6 +119,51 @@ RSpec.describe "GATE conformance" do
     end
   end
 
+  describe "GATE-3 — the decision never latches; the freshest response wins" do
+    # Both shadow directions. A stale slot outranking a fresh one fails in whichever
+    # direction the stale value happened to hold, and one of those directions reports a
+    # closed gate as open.
+    it "does not let a latched catalog `true` outrank a fresh authorize `false`" do
+      client = build_client
+      stub_authorize(key_type: "ip_write", write_enabled: true)
+      stub_request(:get, "https://api.test/api/translations")
+        .with(query: hash_including({ "project_id" => "proj-1" }))
+        .to_return(status: 200,
+                   body: JSON.generate(catalog_body({}).merge("write_enabled" => true)),
+                   headers: { "Content-Type" => "application/json" })
+      client.t("Save", category: "UI")
+      expect(client.can_write?).to be(true)
+
+      # Server now refuses this address. The catalog slot still holds the old `true`.
+      stub_authorize(key_type: "ip_write", write_enabled: false)
+      expect(client.can_write?(refresh: true)).to be(false)
+    end
+
+    it "does not let a latched catalog `false` outrank a fresh authorize `true`" do
+      client = build_client
+      stub_authorize(key_type: "ip_write", write_enabled: false)
+      stub_request(:get, "https://api.test/api/translations")
+        .with(query: hash_including({ "project_id" => "proj-1" }))
+        .to_return(status: 200,
+                   body: JSON.generate(catalog_body({}).merge("write_enabled" => false)),
+                   headers: { "Content-Type" => "application/json" })
+      client.t("Save", category: "UI")
+      expect(client.can_write?).to be(false)
+
+      stub_authorize(key_type: "ip_write", write_enabled: true)
+      expect(client.can_write?(refresh: true)).to be(true)
+    end
+
+    it "drops the decision at an explicit request boundary" do
+      client = build_client
+      stub_authorize(key_type: "ip_write", write_enabled: true)
+      client.project
+      expect(client.write_signal).to be(true)
+      client.reset_write_decision!
+      expect(client.write_signal).to be_nil
+    end
+  end
+
   describe "GATE-1 — the gate actually governs registration, not just the predicate" do
     it "does not POST when the server says write_enabled is false" do
       client = build_client

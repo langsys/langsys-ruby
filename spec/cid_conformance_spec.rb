@@ -159,6 +159,59 @@ RSpec.describe "CID conformance" do
     end
   end
 
+  describe "CID-3 — both uncategorised legacy spellings resolve" do
+    # Two old paths wrote the same uncategorised block under different spellings: one
+    # defaulted the category to '' before joining, the other passed the
+    # '__uncategorized__' sentinel through. The shipping PHP SDK writes the sentinel
+    # form by default, and this SDK's own pre-wave HTML path emitted it too — so an
+    # SDK that tolerates only the empty spelling misses real, already-registered
+    # content. That miss is silent: the block re-registers under the canonical id,
+    # machine translation refills it, the page still looks right, and the human
+    # translations sit orphaned on the old id.
+    it "resolves a block stored under the empty-category pipe spelling" do
+      legacy = Digest::MD5.hexdigest(["", "Welcome"].join("|"))
+      client = build_client
+      stub_authorize
+      stub_translations("es-es", { Langsys::UNCATEGORIZED => { legacy => { "Welcome" => "Bienvenido" } } })
+      client.set_locale("es-ES")
+      expect(client.translate_content_block("<p>Welcome</p>")).to include("Bienvenido")
+    end
+
+    it "resolves a block stored under the __uncategorized__ sentinel pipe spelling" do
+      legacy = Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome"].join("|"))
+      client = build_client
+      stub_authorize
+      stub_translations("es-es", { Langsys::UNCATEGORIZED => { legacy => { "Welcome" => "Bienvenido" } } })
+      client.set_locale("es-ES")
+      expect(client.translate_content_block("<p>Welcome</p>")).to include("Bienvenido")
+    end
+
+    it "offers both uncategorised spellings, most likely first and deduped" do
+      ids = Langsys.legacy_custom_ids(nil, ["Welcome"])
+      expect(ids).to eq([
+                          Digest::MD5.hexdigest(["", "Welcome"].join("|")),
+                          Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome"].join("|"))
+                        ])
+      expect(ids.uniq).to eq(ids)
+    end
+
+    it "offers only the one spelling for a real category" do
+      expect(Langsys.legacy_custom_ids("Home", ["Welcome"]))
+        .to eq([Digest::MD5.hexdigest(%w[Home Welcome].join("|"))])
+    end
+
+    it "still content-verifies a sentinel-spelling match before attaching" do
+      legacy = Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome"].join("|"))
+      client = build_client
+      stub_authorize
+      stub_translations("es-es", { Langsys::UNCATEGORIZED => { legacy => { "Different phrase" => "Otra" } } })
+      client.set_locale("es-ES")
+      out = client.translate_content_block("<p>Welcome</p>")
+      expect(out).to include("Welcome")
+      expect(out).not_to include("Otra")
+    end
+  end
+
   describe "CID-4 — verify a legacy match on content before attaching" do
     # The historical id spaces are not injective, so a legacy hit is not proof of identity.
     it "declines a legacy match whose phrases differ from the current block" do

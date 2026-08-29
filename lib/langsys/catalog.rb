@@ -59,12 +59,13 @@ module Langsys
       @logger = logger
       @memory = {}
       @write_enabled = nil
+      @write_enabled_at = nil
     end
 
     # The write decision as of the most recent catalog response (GATE-1). +nil+ means the
     # field was absent — a pre-capability server — which GATE-8 reads as a version signal,
     # never as permission. Never persisted: it lives on this instance only (GATE-3).
-    attr_reader :write_enabled
+    attr_reader :write_enabled, :write_enabled_at
 
     # Returns the catalog, or +nil+ when it could not be fetched. The nil is load-bearing:
     # without a catalog you cannot tell a miss from a hit, so callers must degrade and
@@ -93,6 +94,12 @@ module Langsys
       catalog
     end
 
+    # GATE-3: drop the recorded decision without touching cached catalog data.
+    def reset_write_decision!
+      @write_enabled = nil
+      @write_enabled_at = nil
+    end
+
     def clear(locale = nil)
       if locale.nil?
         @memory.clear
@@ -114,7 +121,13 @@ module Langsys
       response = @http.get("translations", { "project_id" => @project_id, "locale" => locale, "format" => "flat" })
       # GATE-1: on this endpoint the flag sits at envelope level, beside `words`.
       # Re-read on every response, never latched (GATE-8 constraint 2).
-      @write_enabled = response.key?("write_enabled") ? response["write_enabled"] == true : nil
+      if response.key?("write_enabled")
+        @write_enabled = response["write_enabled"] == true
+        @write_enabled_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      else
+        @write_enabled = nil
+        @write_enabled_at = nil
+      end
       data = response["data"]
       # GATE-4: the cached artifact is `data` only — the envelope carrying the decision
       # is never what we hand to the cache.
