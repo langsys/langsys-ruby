@@ -45,6 +45,27 @@ module Langsys
 
       Resolution.new(text: phrase, missing: true)
     end
+
+    # The set of "category::phrase" keys a catalog already contains, used by +sync+ to
+    # decide what is genuinely new. A question about a catalog, so it lives with the
+    # catalog rather than with the queue that asks it.
+    def existing_keys(catalog)
+      keys = Set.new
+      catalog.each do |category, entries|
+        next unless entries.is_a?(Hash)
+
+        entries.each do |phrase, value|
+          next if phrase.start_with?("__") && phrase.end_with?("__")
+
+          if value.is_a?(Hash)
+            value.each_key { |child| keys << "#{category}::#{child}" }
+          else
+            keys << "#{category}::#{phrase}"
+          end
+        end
+      end
+      keys
+    end
   end
 
   # Loads +category -> phrase -> translation+ maps, with a two-tier cache. Tier 1 is an

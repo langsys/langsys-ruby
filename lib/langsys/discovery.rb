@@ -18,19 +18,24 @@ module Langsys
     BACKOFF_CEILING = 300.0
     # REG-2: a burst from one render becomes one request.
     DEBOUNCE_SECONDS = 0.4
+    # ...but a debounce alone starves a stream that never goes quiet: every new miss
+    # pushes the window out and nothing is ever due. A ceiling on total wait bounds that.
+    MAX_WAIT_SECONDS = 5.0
 
     # What a flush actually sent. Held separately from the live queue so the success
     # handler can clear exactly this and nothing else (REG-6).
-    Snapshot = Struct.new(:phrase_keys, :block_ids, :items, keyword_init: true) do
+    Snapshot = Struct.new(:phrase_keys, :block_ids, :block_categories, :items, keyword_init: true) do
       def empty? = items.empty?
     end
 
     attr_reader :retry_delay
 
-    def initialize(project_id, clock: nil, debounce: DEBOUNCE_SECONDS)
+    def initialize(project_id, clock: nil, debounce: DEBOUNCE_SECONDS, max_wait: MAX_WAIT_SECONDS)
       @project_id = project_id
       @clock = clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
       @debounce = debounce
+      @max_wait = max_wait
+      @dirty_since = nil
       @phrases = {}
       @blocks = {}
       # GATE-5: written only after the server confirms acceptance. Namespaced by project
@@ -72,6 +77,7 @@ module Langsys
       @phrases.clear
       @blocks.clear
       @last_activity = nil
+      @dirty_since = nil
     end
 
     def registered?(category, phrase) = @registered.include?(marker(category, phrase))
@@ -85,7 +91,10 @@ module Langsys
       return false unless pending?
       return true if @last_activity.nil?
 
-      (@clock.call - @last_activity) >= @debounce
+      now = @clock.call
+      return true if @dirty_since && (now - @dirty_since) >= @max_wait
+
+      (now - @last_activity) >= @debounce
     end
 
     # -- REG-7: one send in flight at a time ----------------------------------
@@ -138,7 +147,14 @@ module Langsys
       end
       items += block_ids.map { |id| block_item(@blocks[id]) }
 
-      Snapshot.new(phrase_keys: phrase_keys, block_ids: block_ids, items: items.each_slice(batch_limit).to_a)
+      # Categories are captured HERE, not re-read in #confirm: if the live queue is
+      # cleared while the request is open, the block is gone by then and the marker would
+      # be written under the wrong namespace — a bookkeeping entry that answers for the
+      # wrong category, which GATE-5 makes permanent.
+      categories = block_ids.to_h { |id| [id, @blocks[id] && @blocks[id]["category"]] }
+
+      Snapshot.new(phrase_keys: phrase_keys, block_ids: block_ids, block_categories: categories,
+                   items: items.each_slice(batch_limit).to_a)
     end
 
     # GATE-5: mark and clear THE SNAPSHOT, only after confirmed acceptance.
@@ -148,17 +164,21 @@ module Langsys
         @phrases.delete([category, phrase])
       end
       snapshot.block_ids.each do |id|
-        block = @blocks[id]
-        @registered << marker(block && block["category"], id)
+        @registered << marker(snapshot.block_categories[id], id)
         @blocks.delete(id)
       end
-      @last_activity = nil if @phrases.empty? && @blocks.empty?
+      return unless @phrases.empty? && @blocks.empty?
+
+      @last_activity = nil
+      @dirty_since = nil
     end
 
     private
 
     def touch
-      @last_activity = @clock.call
+      now = @clock.call
+      @dirty_since ||= now
+      @last_activity = now
     end
 
     def marker(category, value)

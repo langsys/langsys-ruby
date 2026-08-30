@@ -8,11 +8,17 @@ require "digest"
 # Vendored from langsys-php at blob 60dc9b33ecfd (commit 8862841, "Pin the canonical
 # serialization at three flags; lock U+2028 with a fixture row"). Vendored rather than
 # fetched so the suite stays hermetic and a fixture change arrives as a reviewable diff.
-FIXTURE_BLOB = "60dc9b33ecfd5fa3256fca7d36063ceb8ef1a00a"
-FIXTURE_PATH = File.expand_path("fixtures/custom-id-reference.json", __dir__)
-ROWS = begin
-  parsed = JSON.parse(File.read(FIXTURE_PATH))
-  parsed.is_a?(Hash) ? parsed["rows"] : parsed
+#
+# Namespaced rather than left as bare top-level constants: a same-named constant in any
+# other spec file rebinds these silently, which is not hypothetical — it happened, and it
+# broke the three integrity assertions below without touching the fixture.
+module CidFixture
+  BLOB = "60dc9b33ecfd5fa3256fca7d36063ceb8ef1a00a"
+  PATH = File.expand_path("fixtures/custom-id-reference.json", __dir__)
+  ROWS = begin
+    parsed = JSON.parse(File.read(PATH))
+    parsed.is_a?(Hash) ? parsed["rows"] : parsed
+  end
 end
 
 RSpec.describe "CID conformance" do
@@ -33,30 +39,30 @@ RSpec.describe "CID conformance" do
     # U+2028 away would leave every hash assertion below testing the pipeline instead
     # of the SDK, and passing.
     it "is the exact blob it was pinned at" do
-      blob = `git hash-object #{Shellwords.escape(FIXTURE_PATH)}`.strip
-      expect(blob).to eq(FIXTURE_BLOB)
+      blob = `git hash-object #{Shellwords.escape(CidFixture::PATH)}`.strip
+      expect(blob).to eq(CidFixture::BLOB)
     end
 
     it "reconstructs every row's input from its declared codepoints" do
-      mismatched = ROWS.each_with_index.reject do |row, _|
+      mismatched = CidFixture::ROWS.each_with_index.reject do |row, _|
         rebuild(row) == ([row["category"].to_s] + Array(row["tokens"])).join
       end
       expect(mismatched.map(&:last)).to be_empty
     end
 
     it "carries a codepoint above U+00FF and a non-BMP codepoint" do
-      all = ROWS.flat_map { |r| codepoints_of(r) }.filter_map { |c| c.to_s[/\AU\+([0-9A-Fa-f]+)\z/, 1]&.to_i(16) }
+      all = CidFixture::ROWS.flat_map { |r| codepoints_of(r) }.filter_map { |c| c.to_s[/\AU\+([0-9A-Fa-f]+)\z/, 1]&.to_i(16) }
       expect(all.any? { |c| c > 0x00FF }).to be(true)
       expect(all.any? { |c| c > 0xFFFF }).to be(true)
     end
 
     it "still contains the U+2028 row the pin exists for (positive control)" do
-      expect(ROWS.any? { |r| codepoints_of(r).any? { |c| c.to_s.casecmp("U+2028").zero? } }).to be(true)
+      expect(CidFixture::ROWS.any? { |r| codepoints_of(r).any? { |c| c.to_s.casecmp("U+2028").zero? } }).to be(true)
     end
   end
 
   describe "CID-1 — one byte-identical hash" do
-    ROWS.each_with_index do |row, i|
+    CidFixture::ROWS.each_with_index do |row, i|
       it "row #{i + 1} hashes to the shared id" do
         expect(Langsys.generate_custom_id(row["category"], row["tokens"])).to eq(row["custom_id"])
       end

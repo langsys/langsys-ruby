@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "openssl"
 
 # Conformance specs for the wire-boundary rules (WIRE-1..WIRE-5) and the write-storm
 # clause WIRE-4 pairs with.
@@ -55,6 +56,57 @@ RSpec.describe "WIRE conformance" do
       client = build_client(base_locale: nil)
       stub_request(:any, /api\.test/).to_raise(Errno::ECONNREFUSED)
       expect { client.t("Save", category: "UI") }.not_to raise_error
+    end
+  end
+
+  describe "WIRE-4 — protocol-layer failures degrade too, not just socket ones" do
+    # The previous guard here stubbed the POST to raise — and t() never POSTs, so it
+    # could not fail however wide the hole was. These aim at the GET, which is the
+    # request every entry point actually makes.
+    #
+    # OpenSSL::SSL::SSLError and Net::HTTPBadResponse are both direct StandardError
+    # subclasses, so no rescue list that enumerates socket errors will catch them. A cert
+    # rotation or an interfering proxy is an ordinary operational event, and on the server
+    # profile an unhandled one turns every t() page into a 500.
+    [
+      [OpenSSL::SSL::SSLError, "certificate verify failed"],
+      [Net::HTTPBadResponse, "wrong status line"],
+      [EOFError, "end of file reached"]
+    ].each do |klass, message|
+      context "when the transport raises #{klass}" do
+        before { stub_request(:any, /api\.test/).to_raise(klass.new(message)) }
+
+        it "degrades t() instead of raising" do
+          client = build_client
+          expect { client.t("Save", category: "UI") }.not_to raise_error
+          expect(client.t("Save", category: "UI")).to eq("Save")
+        end
+
+        it "degrades translate_content_block instead of raising" do
+          client = build_client
+          expect { client.translate_content_block("<p>Save</p>", category: "UI") }.not_to raise_error
+        end
+
+        it "degrades translate_page instead of raising" do
+          client = build_client
+          expect { client.translate_page("<html><body><p>Save</p></body></html>") }.not_to raise_error
+        end
+
+        it "does not raise out of flush_pending with work queued" do
+          client = build_client(cache: Langsys::Cache::Memory.new)
+          client.instance_variable_get(:@discovery).queue_phrase("Save", "UI")
+          expect { client.flush_pending }.not_to raise_error
+          expect(client.flush_pending["success"]).to be(false)
+        end
+
+        it "surfaces it as a Langsys::Error to a caller that asks directly" do
+          # Degrading must not mean losing the diagnosis: a caller reaching the transport
+          # deliberately still gets a typed, named failure.
+          http = Langsys::Http.new("https://api.test/api", "k")
+          expect { http.get("translations") }
+            .to raise_error(Langsys::NetworkError, /#{Regexp.escape(klass.name)}/)
+        end
+      end
     end
   end
 

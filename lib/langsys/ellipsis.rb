@@ -18,7 +18,7 @@ module Langsys
     def ellipsis_stem(phrase)
       return nil unless phrase.is_a?(String)
 
-      stripped = phrase.sub(/(?:\u2026|\.\.\.)\s*\z/, "")
+      stripped = phrase.sub(TRAILING, "")
       stripped == phrase ? nil : stripped.strip
     end
 

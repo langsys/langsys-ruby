@@ -80,6 +80,88 @@ RSpec.describe "REG conformance" do
     end
   end
 
+  describe "REG-3 — a backed-off queue is never dropped silently at shutdown" do
+    it "makes one final attempt even while backing off" do
+      now = 0.0
+      client = writing_client(clock: -> { now })
+      failing = stub_request(:post, "https://api.test/api/translatable-items").to_raise(Errno::ECONNREFUSED)
+      client.t("Save", category: "UI")
+      client.flush_pending # fails, arms the backoff
+      expect(failing).to have_been_requested.once
+
+      post_stub                                  # the endpoint recovers
+      client.flush_on_shutdown                   # must not be blocked by the backoff
+      expect(client.pending_phrases).to be_empty
+    end
+
+    it "logs the abandonment with a count when that final attempt also fails" do
+      logged = []
+      logger = double("logger")
+      allow(logger).to receive(:warn) { |m| logged << m }
+      allow(logger).to receive(:debug)
+      client = writing_client(logger: logger)
+      stub_request(:post, "https://api.test/api/translatable-items").to_raise(Errno::ECONNREFUSED)
+      client.t("Save", category: "UI")
+      client.flush_pending
+      logged.clear
+      client.flush_on_shutdown
+      # There is no later page in this session to recover on, so silence here is
+      # permanent loss that nothing records.
+      expect(logged.grep(/abandon/i).join).to include("1")
+    end
+  end
+
+  describe "REG-2 — a continuous trickle still sends" do
+    it "flushes once the max wait has elapsed even if activity never settles" do
+      # Debounce alone starves a stream that never goes quiet: each new miss pushes the
+      # window out and nothing is ever due.
+      now = 0.0
+      client = writing_client(clock: -> { now })
+      20.times do |i|
+        client.t("Trickle #{i}", category: "UI")
+        now += 0.3 # always shorter than the debounce
+      end
+      expect(client.flush_due?).to be(true)
+    end
+
+    it "still waits for the burst to settle when the max wait has not elapsed" do
+      now = 0.0
+      client = writing_client(clock: -> { now })
+      client.t("Save", category: "UI")
+      now += 0.3
+      client.t("Cancel", category: "UI")
+      expect(client.flush_due?).to be(false)
+    end
+  end
+
+  describe "REG-10 — an unresolvable write decision is reported, not raised" do
+    it "reports decision_unavailable and retains the queue when authorize fails" do
+      now = 0.0
+      client = build_client(clock: -> { now }, cache: Langsys::Cache::Memory.new)
+      stub_authorize(key_type: "write", write_enabled: true)
+      stub_translations("en-us", { "UI" => {} })
+      client.t("Save", category: "UI")
+
+      # Authorize itself now fails — the capability check is a network call too.
+      stub_request(:any, /api\.test/).to_raise(Errno::ECONNREFUSED)
+      result = client.flush_pending(refresh: true)
+      expect(result["success"]).to be(false)
+      expect(result["reason"]).to eq("decision_unavailable")
+      expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Save"])
+    end
+
+    it "backs off after an unresolvable decision rather than retrying immediately" do
+      now = 0.0
+      client = build_client(clock: -> { now }, cache: Langsys::Cache::Memory.new)
+      stub_authorize(key_type: "write", write_enabled: true)
+      stub_translations("en-us", { "UI" => {} })
+      client.t("Save", category: "UI")
+      stub_request(:any, /api\.test/).to_raise(Errno::ECONNREFUSED)
+      client.flush_pending(refresh: true)
+      expect(client.retry_delay).to eq(3.0)
+    end
+  end
+
   describe "REG-6 — snapshot the batch; never clear the live queue after an await" do
     it "keeps an item queued when it arrives mid-request" do
       # The window is every in-flight request. Clearing the live queue afterwards marks
@@ -103,6 +185,35 @@ RSpec.describe "REG conformance" do
       client.t("Save", category: "UI")
       client.flush_pending
       expect(client.pending_phrases).to be_empty
+    end
+  end
+
+  describe "GATE-5 — the marker's namespace comes from the snapshot, not the live queue" do
+    it "records a content block under its own category even if the queue is cleared mid-flight" do
+      # #confirm used to re-read @blocks for the category. If the live queue is cleared
+      # while the request is open the block is gone by then, the category reads as nil,
+      # and the marker lands under __uncategorized__ — a bookkeeping entry answering for
+      # the wrong category, which GATE-5 then makes permanent. The server de-duplicates
+      # the registration itself, so nothing downstream would ever reveal it.
+      client = writing_client
+      stub_translations("en-us", { "Home" => {} })
+      cleared = false
+      stub_request(:post, "https://api.test/api/translatable-items")
+        .to_return do
+          unless cleared
+            cleared = true
+            client.clear_pending
+          end
+          { status: 200, body: JSON.generate({ "status" => true }),
+            headers: { "Content-Type" => "application/json" } }
+        end
+
+      client.translate_content_block("<p>Welcome</p>", category: "Home")
+      custom_id = Langsys.generate_custom_id("Home", ["Welcome"])
+      client.flush_pending
+
+      expect(client.registered?("Home", custom_id)).to be(true)
+      expect(client.registered?(Langsys::UNCATEGORIZED, custom_id)).to be(false)
     end
   end
 
@@ -215,13 +326,20 @@ RSpec.describe "REG conformance" do
       client.flush_pending
       expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Save"])
 
+      # The warm client KEEPS queueing new misses, because a cached catalog can still
+      # tell a miss from a hit. Asserted rather than described: this is the half that
+      # distinguishes "outage" from "failed fetch", and a comment proves nothing.
+      client.t("Rendered against the warm catalog", category: "UI")
+      expect(client.pending_phrases.map { |p| p["phrase"] })
+        .to contain_exactly("Save", "Rendered against the warm catalog")
+
       # A client with no catalog of its own records nothing during the same outage.
       fresh = build_client(clock: -> { now }, cache: Langsys::Cache::Memory.new)
       5.times { fresh.t("Rendered during the outage", category: "UI") }
       expect(fresh.pending_phrases).to be_empty
 
       # ...and the first client's queue is still intact, not drained by the failures.
-      expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Save"])
+      expect(client.pending_phrases.map { |p| p["phrase"] }).to include("Save")
     end
   end
 

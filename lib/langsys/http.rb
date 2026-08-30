@@ -65,8 +65,22 @@ module Langsys
       http.open_timeout = @timeout
       http.read_timeout = @timeout
       http.request(request)
-    rescue SocketError, SystemCallError, Net::OpenTimeout, Net::ReadTimeout, IOError => e
-      raise NetworkError, "Could not reach the Langsys API: #{e.message}"
+    rescue Langsys::Error
+      raise
+    rescue StandardError => e
+      # Deliberately every StandardError, not a list of socket classes.
+      #
+      # An enumerated list was the previous shape and it leaked: +OpenSSL::SSL::SSLError+
+      # and +Net::HTTPBadResponse+ are direct +StandardError+ subclasses, under neither
+      # +SystemCallError+ nor +Net::ProtocolError+, so a cert rotation or an interfering
+      # proxy escaped unwrapped — and every guard downstream rescues +Langsys::Error+
+      # only. On the server profile that turns an ordinary operational event into a 500 on
+      # every page that calls +t+, which is exactly the availability coupling WIRE-4 names.
+      #
+      # The scope this covers is one line — +http.request+ — so "any exception here" and
+      # "the transport failed" are the same statement. The class name is kept in the
+      # message: degrading must not cost the diagnosis.
+      raise NetworkError, "Could not reach the Langsys API (#{e.class}): #{e.message}"
     end
 
     def parse(response, _verb, _path)

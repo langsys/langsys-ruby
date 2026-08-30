@@ -38,9 +38,20 @@ module Langsys
     # REG-3: the end-of-context flush. Best-effort by construction — it must never raise
     # into a shutdown path, and it cannot be relied on (no hook runs on an OOM kill).
     def flush_on_shutdown
-      flush_pending
+      pending = @discovery.phrase_count + @discovery.block_count
+      # The backoff is bypassed for this one attempt. A backed-off queue at shutdown would
+      # otherwise be dropped without a request and without a line in the log, and unlike a
+      # browser there is no later page in this session to recover on.
+      result = flush_pending(ignore_backoff: true)
+      return result if result["success"] || pending.zero?
+
+      @logger&.warn("langsys: abandoning #{pending} unregistered item(s) at shutdown " \
+                    "(#{result['reason']}). They are lost: this process is ending and the " \
+                    "queue is in memory only.")
+      result
     rescue StandardError => e
-      @logger&.warn("langsys: shutdown flush failed (#{e.class}: #{e.message})")
+      @logger&.warn("langsys: shutdown flush failed (#{e.class}: #{e.message}); " \
+                    "abandoning #{pending} unregistered item(s)")
       empty_result(success: false, reason: "shutdown_failed")
     end
 
@@ -50,7 +61,7 @@ module Langsys
     # path, it always logs, and it never returns a success-shaped result for work that did
     # not happen — a skipped write reports +success: false+ with a reason, because a caller
     # that correctly checks the return value must not be told it worked.
-    def flush_pending(refresh: false)
+    def flush_pending(refresh: false, ignore_backoff: false)
       return empty_result(success: true) unless @discovery.pending?
 
       # REG-7: exactly one send in flight. A second caller is told so rather than being
@@ -59,7 +70,7 @@ module Langsys
 
       begin
         # REG-8: a failing endpoint is not retried until its delay has elapsed.
-        return empty_result(success: false, reason: "backing_off") if @discovery.backing_off?
+        return empty_result(success: false, reason: "backing_off") if @discovery.backing_off? && !ignore_backoff
 
         # Resolving capability is itself a network call, so it can fail. REG-10 says this
         # method has exactly one behaviour and throwing is not it.
@@ -103,7 +114,7 @@ module Langsys
     def sync(local_phrases, locale: nil)
       loc = effective_locale(locale)
       catalog = @catalog.get(loc, use_cache: false)
-      existing = existing_keys(catalog)
+      existing = Catalog.existing_keys(catalog)
 
       new_items = local_phrases.reject do |phrase|
         text = phrase.is_a?(String) ? phrase : (phrase[:phrase] || phrase["phrase"])
@@ -210,24 +221,6 @@ module Langsys
 
     def registrar
       @registrar ||= Registrar.new(@http, @config.project_id, batch_limit: authorize.batch_limit)
-    end
-
-    def existing_keys(catalog)
-      keys = Set.new
-      catalog.each do |category, entries|
-        next unless entries.is_a?(Hash)
-
-        entries.each do |phrase, value|
-          next if phrase.start_with?("__") && phrase.end_with?("__")
-
-          if value.is_a?(Hash)
-            value.each_key { |child| keys << "#{category}::#{child}" }
-          else
-            keys << "#{category}::#{phrase}"
-          end
-        end
-      end
-      keys
     end
   end
 end
