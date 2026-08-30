@@ -29,14 +29,17 @@ RSpec.describe Langsys::Client do
   end
 
   describe "#flush_pending" do
-    it "drops the queue on a read key without writing" do
+    it "retains the queue on a read key rather than dropping it (GATE-2)" do
       stub_translations("en-us", { "UI" => {} })
       stub_authorize(key_type: "read")
       client = build_client
       client.t("Save", category: "UI")
       result = client.flush_pending
-      expect(result["skipped"]).to be true
-      expect(client.has_pending?).to be false
+      # A skipped write is not a success, and the phrases are not lost: the decision is
+      # per-session and can resolve differently on the next response (GATE-2, REG-10).
+      expect(result["success"]).to be false
+      expect(result["reason"]).to eq("not_write_enabled")
+      expect(client.has_pending?).to be true
       expect(a_request(:post, "https://api.test/api/translatable-items")).not_to have_been_made
     end
 

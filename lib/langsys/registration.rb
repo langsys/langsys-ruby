@@ -84,6 +84,15 @@ module Langsys
       post_items(items)
     end
 
+    # REG-9: post a pre-chunked batch of already-shaped items. The queue path builds
+    # phrases and content blocks into ONE list before chunking, so a first uncached render
+    # of a page with 40 new blocks is one request rather than 40 sequential blocking POSTs.
+    def register_items(items)
+      return [] if items.empty?
+
+      [@http.post("translatable-items", { "project_id" => @project_id, "translatable_items" => items })]
+    end
+
     def register_content_block(content, phrases, category: nil, custom_id: nil, label: nil)
       item = {
         "type" => "content_block",

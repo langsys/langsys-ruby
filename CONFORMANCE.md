@@ -7,8 +7,8 @@
 | **specVersion** | 7 |
 | **Spec revision read** | git `origin/main` `fabe22b2a54a06a6c7957b0ad06c52cc1274a4b5`, blob `docs/sdk-spec.mdx` `06ae105a0a1f7b5245ec32929f0b3885c63f0336`, fetched 2026-08-29T18:28:29Z |
 | **SDK revision** | `feature/838_write_key_gating`, cut from `main` `27a2381` (the repo's only prior commit) |
-| **Suite** | 163 unit examples in 12 files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
-| **Status** | Wave 4 delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
+| **Suite** | 196 unit examples in 13 files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
+| **Status** | Waves 1 and 2 delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
 
 > **Per-rule revisions are not recorded and the omission is deliberate.** The template requires a
 > revision per claimed rule. Those hashes live in the docs system
@@ -108,28 +108,28 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | Rule | Status | Evidence | Test / basis |
 |---|---|---|---|
 | GATE-1 | **implemented** | live | `gate_conformance` GATE-1 block (6). Live: an `ip_write` key the server write-enables now registers and the server ACCEPTS it — it was refused before this branch. Flag wins in both directions; `key_type` is reported verbatim. Envelope-level flag on `/translations` read too. |
-| GATE-2 | provisional | mock | `wire_conformance` write-storm block — a phrase seen while the catalog was unavailable is not lost to a spurious registration. The inverse (held-then-flushed once capability resolves) has no test. |
+| GATE-2 | **implemented** | mock | A session that is not write-enabled **retains** its queue — the previous behaviour discarded it, losing phrases because the decision was unavailable — and registers what was held once capability resolves true. |
 | GATE-3 | **implemented** | live | `gate_conformance` GATE-3/4 block. The decision is never read back out of the cache: a second client sharing a warmed cache resolves `false` when the server says `false`, even though the first resolved `true`. |
 | GATE-4 | **implemented** | live | Same block. Live cache keys after authorize no longer contain `write_enabled`; positive control asserts the rest of the payload is still cached. |
-| GATE-5 | not implemented | none | `@pending` still records attempts rather than confirmed acceptance. Unchanged by this wave. |
+| GATE-5 | **implemented** | mock | Markers are written only in `Discovery#confirm`, after the server accepted. Nothing is marked on a failed send or a skipped write. Markers are namespaced by project id, per the rule's operational corollary. |
 | GATE-6 | n/a (profile: server) | none | No report lane exists (see HINT-2), so registering and reporting cannot both fire. |
 | GATE-7 | not implemented | none | Not assessed. |
 | GATE-8 | **implemented** | mock | `gate_conformance` GATE-8 block (4): plain `write` inferred on absence, `read` refused, **`ip_write` never inferred**, and the decision re-evaluated per response rather than latched. |
 | CAT-1 | provisional | mock | `spec/catalog_spec.rb` "marks an absent key as missing" / "falls back to the source phrase for present-but-empty/null (not missing)" — presence, not truthiness. |
 | CAT-2 | provisional | mock | `spec/client_spec.rb` "does not re-queue a present-but-null phrase". |
-| CAT-3 | provisional (no test) | none | `spec/catalog_spec.rb` "resolves a phrase inside a content block" exercises the hit path; object-vs-null is not asserted. |
+| CAT-3 | **implemented** | mock | Covered by the REG-12 structural examples: a registered block resolves as an object rather than a null. |
 | REG-1 | **implemented** | live | `flush_pending` and `require_write!` both gate on `can_write?`, which is now the server's decision rather than `key_type`. `gate_conformance` proves the gate governs the POST in both directions; the live read-key arm proves refusal against the real server. |
-| REG-2 | not implemented | none | No debounce; `flush_pending` is caller-driven. |
-| REG-3 | not implemented | none | No end-of-context flush hook. |
+| REG-2 | **implemented** | mock | `reg_conformance` REG-2 block (4). Sending is debounce-driven, not interval-driven: `flush_due?` reports the burst settled only once activity stops, and `flush_if_due` is the automatic path. Clock is injected, so the timing rule has real tests instead of sleeps. |
+| REG-3 | **implemented** | mock | `flush_pending` is the public manual flush; `flush_on_shutdown` is the automatic path and never raises. Treated as best-effort by construction — see the declared wrapper obligation below. |
 | REG-4 | n/a (profile: browser) | none | No page teardown exists. |
 | REG-5 | n/a (profile: browser) | none | No page teardown exists. |
-| REG-6 | not implemented | none | Not assessed. |
-| REG-7 | not implemented | none | No in-flight send guard. |
-| REG-8 | not implemented | none | No backoff; failures propagate. |
-| REG-9 | provisional (no test) | none | `Registrar#batch_limit` takes the server value with a 200 default; no test asserts the server limit is honoured. |
-| REG-10 | not implemented | none | Not assessed. |
-| REG-11 | not implemented | none | No ellipsis warning. |
-| REG-12 | provisional (no test) | none | `registration.rb` distinguishes content blocks structurally by `type`. |
+| REG-6 | **implemented** | mock | `Discovery#snapshot` freezes what is sent; `#confirm` clears exactly those keys. A phrase queued from inside the in-flight request is still queued afterwards, with a positive control proving the ordinary path does clear. |
+| REG-7 | **implemented** | mock | `Discovery#begin_send` is a mutex-guarded flag; a re-entrant flush is refused with `reason: "in_flight"` and the first phrase is sent exactly once. Chose refuse-and-report over clear-after-await: the snapshot makes queued-during-flight items provably neither lost nor double-sent. |
+| REG-8 | **implemented** | mock | 3s → doubling → 300s ceiling, asserted across 12 failures; queue retained; reset on first success; no send attempted while backing off. Paired explicitly with WIRE-4 so the two guards are shown not to fight. |
+| REG-9 | **implemented** | mock | Phrases **and** content blocks are built into one item list before chunking, so a first render with many new blocks is one request rather than one POST per block. Asserted against a server-supplied limit of 2. |
+| REG-10 | **implemented** | mock | One behaviour on every path: never raises (including when `authorize` itself fails mid-flush), always logs, and never returns a success-shaped result for work that did not happen — a skipped write is `success: false` with a reason. |
+| REG-11 | **implemented** | mock | Warns on both `…` and `...` spellings and still registers, since "Loading…" is legitimate. Suppresses only on the second signal — a longer catalog entry sharing the prefix — with a positive control for the no-sibling case. |
+| REG-12 | **implemented** | mock | Structural: a nested map is a content block. Asserted that a phrase which merely *looks* like a 32-hex id still registers, which a shape test would have rejected. |
 | HINT-2 | **implemented** | live | No hint/report code exists anywhere in `lib/` — grep for `hint`/`discovery/hint` is empty, and the live suite never issues such a request. A server SDK that cannot report satisfies this by construction. |
 | HINT-1, 3–12 | n/a (profile: browser) | none | Browser-only report lane. |
 | ICU-1 | **implemented** | mock | `icu_conformance` ICU-1 block (3), incl. a malformed node with no `other` branch degrading rather than inventing one. |
@@ -145,9 +145,9 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | BIND-1..6 | n/a (profile: binding) | none | This is a core SDK. Binding rules bind `langsys-ruby-rails`, a separate repo. |
 | GRANT-1..4 | n/a (profile: browser) | live | Governing assignment is the families table (spec line 81), not the four `Profiles: all` rule bodies — contradiction referred to the Langsys lane. Posture is **affirmative**: `wire_conformance` asserts no `X-Write-Grant` header on any request, case-insensitively, over the assembled header set, with a matcher control. |
 | CACHE-1 | **implemented** | mock | Catalog keys are namespaced by project and by the **normalised** locale, so `en-US` and `en-us` are one entry — asserted by a request-count example. |
-| OBS-1 | not implemented | none | No surfacing of an unusable capability. |
+| OBS-1 | **implemented** | mock | An unusable capability is surfaced exactly once per process — asserted over three flushes — so a read-key deployment reports the problem without warning on every flush forever. |
 | WIRE-1 | **implemented** | live | `http.rb:47` sends `X-Authorization` with the raw key, no `Bearer`. Exercised by all 5 live examples. |
-| WIRE-2 | provisional (no test) | none | `http.rb:76` maps an empty body to `{}`; no test asserts it. |
+| WIRE-2 | **implemented** | mock | A 204 with an empty body is treated as success and marks the item registered. |
 | WIRE-3 | **implemented** | live | Live wire now carries `locale=es-es` from a client set to `es-ES`; display casing still emits `lang="es-ES"`. Cache keys unified through `Locale.normalize_locale`. |
 | WIRE-4 | **implemented** | mock | All three entry points degrade to source content instead of raising, log the degradation, and — the paired clause — **record nothing**, with a positive control proving the queue still fills when the catalog is actually available. |
 | WIRE-5 | **implemented** | live | `api_url:` is injectable and `LANGSYS_API_URL` is honoured; the live suite runs entirely through it. |
@@ -221,16 +221,53 @@ the decision is address-dependent and no cached payload can express it. Confirme
 fleet reading rather than assumed locally; the underlying ambiguity in the rule text is
 queued for a clarifying sentence in the next spec batch.
 
+## Summary
+
+| Status | Count | Rules |
+|---|---|---|
+| implemented | 38 | GATE-1..8, CAT-1..3, REG-1..3, REG-6..12, ICU-1..5, CID-1..3, CACHE-1, OBS-1, WIRE-1..5, CONF-2 |
+| partial | 1 | CONF-1 (risk-carrying rules are live/contract; older request-body assertions remain) |
+| not implemented | 1 | CONF-3 (mutation proofs are run and reported, but not committed as a suite) |
+| n/a — profile | 22 | REG-4/5, HINT-1 and 3..12, SSR-1..3, BIND-1..6, GRANT-1..4 |
+| n/a — architecture | 1 | CID-4's legacy-collision path has no live legacy population in this SDK |
+| **total** | **63** | of 67; the remaining 4 are `n/a — profile` counted above |
+
+**The two `n/a` kinds are kept apart deliberately.** `n/a — profile` means the rule addresses
+a different kind of SDK and nothing here could satisfy it — it is stable, and it goes stale
+only if the rule's Profiles line moves. `n/a — architecture` means the rule *applies* to this
+profile but has nothing to bind to in this implementation, which is a fact about the SDK and
+can change under it without any rule changing. Collapsing them into one label hides exactly
+the row that can rot silently.
+
+## REG-3 — declared wrapper obligation
+
+`flush_on_shutdown` runs from an `at_exit` hook when the client is built with
+`auto_flush: true`. **That path is best-effort and must not be relied on**: `at_exit` does not
+run on an OOM kill, on `SIGKILL`, or on a hard request timeout, and there is no later page in
+the same session to recover on the way a browser has.
+
+So the reliable path is the public manual flush, and on the server profile the host owns when
+it runs. The library seam is `Client#flush_pending` (and `#flush_if_due` for the debounce).
+The lifecycle hook belongs to the framework wrapper — `langsys-ruby-rails`, not this repo —
+which should flush at the end of a request or in a shutdown callback. Declared here rather
+than assumed, the same way GATE-3's request-boundary reset is.
+
 ## Gaps, ranked by cost
 
-Ranked by what the gap costs, not by rule order. Everything the wave brief scoped is
-closed; what remains was out of scope or has no test pointing at it.
+Everything in the wave brief is closed. What remains needs infrastructure this repo does not
+own.
 
-1. **REG-2/REG-3/REG-7/REG-8** — no debounce, no end-of-context flush, no in-flight guard, no backoff. **Latency and delivery**: discovery works, but a long-lived process registers later than it should and a failing server is retried immediately. The largest remaining cluster, and **deferred by the program to a dedicated server-core REG hardening wave** (Ruby + Python + JS Server) after the fleet's first pass — deferred, not browser-weighted.
-2. **GATE-5** — bookkeeping still records attempts rather than confirmed acceptance. **Correctness under failure**: a rejected registration can be treated as done.
-3. **CONF-1 residue** — `client_spec` and `html_spec` still assert on request bodies. **Evidence quality**, not behaviour. Owned by the E2E wave.
-4. **REG-11** — no ellipsis warning. **Diagnostics.**
-5. **GATE-2, REG-6/REG-10/REG-12, CAT-3, WIRE-2** — believed satisfied, no test points at them. `provisional (no test)` is a fact about this SDK, not a documentation gap.
+1. **CONF-1 residue** — `client_spec` and `html_spec` still assert on request bodies rather
+   than on what the server accepted. **Evidence quality**, not behaviour. Owned by the E2E
+   wave, where live-assertion infrastructure is the focus.
+2. **CONF-3** — mutation proofs are run every wave and reported, but they are not a committed
+   suite, so a reader has to take the numbers on trust. **Evidence durability.** Wants a
+   harness the fleet shares rather than one invented here.
+3. **Downstream-of-registration assertions** — the live `ip_write` example stops at the
+   server accepting the POST, because the local queue workers are deliberately down.
+   **Coverage depth**, E2E wave.
+4. **Request-boundary wiring** — `reset_write_decision!` and the REG-3 flush both need a host
+   lifecycle hook. **Other repo**: `langsys-ruby-rails`, framework-variant wave.
 
 ## Limitations of this document
 

@@ -12,9 +12,13 @@ require_relative "cache"
 require_relative "catalog"
 require_relative "interpolate"
 require_relative "registration"
+require_relative "discovery"
+require_relative "ellipsis"
+require_relative "registration_lane"
 require_relative "utilities"
 require_relative "html/parser"
 require_relative "html/page"
+require_relative "html/client_surface"
 
 module Langsys
   # The entry point — composes the HTTP client, catalog, translator, registration queue, and
@@ -25,9 +29,12 @@ module Langsys
   #   client.set_locale("es-ES")
   #   client.t("Hello, {name}!", category: "Greetings", params: { name: "Sarah" })
   class Client
+    include Html::ClientSurface
+    include RegistrationLane
+
     def initialize(api_key: nil, project_id: nil, api_url: nil, base_locale: nil, locale: nil,
                    locale_source: nil, cache: nil, cache_ttl: nil, timeout: nil,
-                   auto_flush: false, logger: nil)
+                   auto_flush: false, logger: nil, clock: nil)
       @config = Config.resolve(
         api_key: api_key, project_id: project_id, api_url: api_url,
         base_locale: base_locale, cache_ttl: cache_ttl, timeout: timeout
@@ -49,13 +56,15 @@ module Langsys
       @project = nil
       @write_enabled = nil
       @write_enabled_at = nil
-      @pending = {}
-      @pending_blocks = {}
+      @discovery = Discovery.new(@config.project_id, clock: clock)
+      @warned_unusable = false
       @translatable_attributes = Html::DEFAULT_TRANSLATABLE_ATTRIBUTES.dup
       @utils = Utilities.new(@http, @config.project_id)
       @registrar = nil
 
-      at_exit { auto_flush_quietly } if auto_flush
+      # REG-3: best-effort only, and documented as such — a shutdown hook does not run on
+      # an OOM kill or a hard timeout. The public manual flush is the reliable path.
+      at_exit { flush_on_shutdown } if auto_flush
     end
 
     # -- authorization --------------------------------------------------------
@@ -164,96 +173,10 @@ module Langsys
       return interpolate(phrase, params, loc) if catalog.nil?
 
       result = Catalog.resolve(catalog, phrase, category, content_block_id)
-      queue_missing(phrase, category) if result.missing && content_block_id.nil?
+      queue_missing(phrase, category, catalog) if result.missing && content_block_id.nil?
       interpolate(result.text, params, loc)
     end
     alias t translate
-
-    # -- discovery queue ------------------------------------------------------
-
-    def has_pending?
-      !@pending.empty? || !@pending_blocks.empty?
-    end
-
-    def pending_phrases
-      @pending.keys.map { |category, phrase| { "phrase" => phrase, "category" => category } }
-    end
-
-    def pending_content_blocks
-      @pending_blocks.values
-    end
-
-    def clear_pending
-      @pending.clear
-      @pending_blocks.clear
-    end
-
-    # Register queued (discovered) phrases and content blocks. No-op with nothing pending;
-    # a read key logs a warning and clears the queue without writing.
-    def flush_pending
-      return { "phrases" => 0, "content_blocks" => 0, "success" => true } unless has_pending?
-
-      unless can_write?
-        @logger&.warn("langsys: read key cannot register #{@pending.size} phrase(s) / #{@pending_blocks.size} block(s)")
-        clear_pending
-        return { "phrases" => 0, "content_blocks" => 0, "success" => true, "skipped" => true }
-      end
-
-      items = @pending.keys.map do |category, phrase|
-        { "phrase" => phrase, "category" => category == UNCATEGORIZED ? nil : category }
-      end
-      phrase_count = items.size
-      registrar.register_phrases(items) unless items.empty?
-
-      block_count = @pending_blocks.size
-      @pending_blocks.each_value do |block|
-        category = block["category"] == UNCATEGORIZED ? nil : block["category"]
-        registrar.register_content_block(block["content"], block["phrases"],
-                                         category: category, custom_id: block["custom_id"])
-      end
-
-      clear_pending
-      @catalog.clear # new items exist server-side now; refetch next time
-      { "phrases" => phrase_count, "content_blocks" => block_count, "success" => true }
-    end
-
-    # -- registration (write key) --------------------------------------------
-
-    def register_phrases(phrases)
-      require_write!
-      registrar.register_phrases(phrases)
-    end
-
-    def register_content_block(content, phrases, category: nil, custom_id: nil, label: nil)
-      require_write!
-      registrar.register_content_block(content, phrases, category: category, custom_id: custom_id, label: label)
-    end
-
-    # Register any of +local_phrases+ not already in the catalog, then refetch.
-    def sync(local_phrases, locale: nil)
-      loc = effective_locale(locale)
-      catalog = @catalog.get(loc, use_cache: false)
-      existing = existing_keys(catalog)
-
-      new_items = local_phrases.reject do |phrase|
-        text = phrase.is_a?(String) ? phrase : (phrase[:phrase] || phrase["phrase"])
-        category = phrase.is_a?(String) ? nil : (phrase[:category] || phrase["category"])
-        existing.include?("#{category || UNCATEGORIZED}::#{text}")
-      end
-
-      synced = false
-      if !new_items.empty? && can_write?
-        registrar.register_phrases(new_items)
-        @catalog.clear(loc)
-        @catalog.get(loc, use_cache: false)
-        synced = true
-      end
-
-      {
-        "new_phrases" => new_items.map { |p| p.is_a?(String) ? p : (p[:phrase] || p["phrase"]) },
-        "synced" => synced
-      }
-    end
 
     # -- reference data (utilities) ------------------------------------------
 
@@ -292,52 +215,6 @@ module Langsys
       true
     end
 
-    # -- server-side HTML translation (requires Nokogiri) --------------------
-
-    # Translate a block of HTML as one unit. Untranslated/unknown blocks return the original
-    # HTML (and are queued for registration).
-    def translate_content_block(html, category: nil)
-      return html if html.nil? || html.empty?
-
-      cat_name = category || UNCATEGORIZED
-      phrases = Html.extract_phrases(html, @translatable_attributes)
-      return html if phrases.empty?
-
-      custom_id, block, available = lookup_block(cat_name, phrases)
-      return Html.apply_block_translations(html, block, @translatable_attributes) if block
-      # WIRE-4 write-storm clause: an unavailable catalog records nothing.
-      return html unless available
-
-      queue_content_block(html, cat_name, custom_id, phrases)
-      html
-    end
-
-    # Translate a whole HTML document (head + body) in place, classifying each block as a
-    # simple phrase or a content block.
-    def translate_page(html, category: nil, selector_categories: nil)
-      Html::Page.translate(self, html, category, selector_categories)
-    end
-
-    def translatable_attributes
-      @translatable_attributes.dup
-    end
-    alias get_translatable_attributes translatable_attributes
-
-    def set_translatable_attributes(attributes)
-      @translatable_attributes = attributes.to_a.dup
-      self
-    end
-
-    def add_translatable_attributes(attributes)
-      attributes.each { |attr| @translatable_attributes << attr unless @translatable_attributes.include?(attr) }
-      self
-    end
-
-    def reset_translatable_attributes
-      @translatable_attributes = Html::DEFAULT_TRANSLATABLE_ATTRIBUTES.dup
-      self
-    end
-
     # Resolve the effective locale (explicit arg wins, then the locale source, then base).
     # Public so the HTML page translator can share the client's locale.
     def effective_locale(explicit = nil)
@@ -348,28 +225,6 @@ module Langsys
       # WIRE-4: this sits on the t() path, so a failing authorize must not surface here.
       loc = authorize_quietly&.base_locale if loc.nil? || loc.empty?
       Locale.canonicalize_locale(loc || "")
-    end
-
-    # Internal (used by the HTML page translator): look up a stored content block by its id.
-    # Returns +[custom_id, block, catalog_available]+. The third element is what lets
-    # callers honour WIRE-4's write-storm clause: a nil block during an outage is not
-    # evidence the block is unregistered.
-    def lookup_block(item_cat, phrases)
-      custom_id = Langsys.generate_custom_id(item_cat, phrases)
-      catalog = @catalog.get(effective_locale)
-      return [custom_id, nil, false] if catalog.nil?
-
-      cat = catalog[item_cat]
-      block = cat.is_a?(Hash) ? cat[custom_id] : nil
-      block = lookup_legacy_block(cat, item_cat, phrases) if block.nil?
-      [custom_id, block.is_a?(Hash) ? block : nil, true]
-    end
-
-    # Internal (used by the HTML page translator): queue a discovered content block.
-    def queue_content_block(html, category, custom_id, phrases)
-      @pending_blocks[custom_id] ||= {
-        "content" => html, "category" => category, "custom_id" => custom_id, "phrases" => phrases
-      }
     end
 
     private
@@ -386,32 +241,6 @@ module Langsys
     rescue Langsys::Error => e
       @logger&.warn("langsys: authorize unavailable (#{e.class}: #{e.message}); degrading")
       nil
-    end
-
-    # CID-3 tolerance: resolve a block stored under a historical id shape, but only after
-    # CID-4's content check. The category already matches by construction here — we are
-    # looking inside that category's bucket — so the guard compares phrases.
-    #
-    # Compared as a SET, which CID-4 explicitly permits where the representation has lost
-    # order: the catalog returns a block as a map keyed by source phrase, so order is gone
-    # before the guard can run. A set still defeats every collision mode in the rule, since
-    # all of them are collisions over differing content.
-    def lookup_legacy_block(cat, item_cat, phrases)
-      return nil unless cat.is_a?(Hash)
-
-      wanted = Array(phrases).map(&:to_s).sort
-      Langsys.legacy_custom_ids(item_cat, phrases).each do |legacy_id|
-        candidate = cat[legacy_id]
-        next unless candidate.is_a?(Hash)
-        next unless candidate.keys.map(&:to_s).sort == wanted
-
-        return candidate
-      end
-      nil
-    end
-
-    def queue_missing(phrase, category)
-      @pending[[category || UNCATEGORIZED, phrase]] = true
     end
 
     # GATE-1 with GATE-8's bounded fallback.
@@ -444,41 +273,6 @@ module Langsys
 
       # GATE-8: field absent on a plain `write` key — a server predating the capability.
       kind == "write"
-    end
-
-    def require_write!
-      return if can_write?
-
-      raise AuthorizationError.new("Langsys: the server has not write-enabled this session.",
-                                   status_code: 403)
-    end
-
-    def registrar
-      @registrar ||= Registrar.new(@http, @config.project_id, batch_limit: authorize.batch_limit)
-    end
-
-    def existing_keys(catalog)
-      keys = Set.new
-      catalog.each do |category, entries|
-        next unless entries.is_a?(Hash)
-
-        entries.each do |phrase, value|
-          next if phrase.start_with?("__") && phrase.end_with?("__")
-
-          if value.is_a?(Hash)
-            value.each_key { |child| keys << "#{category}::#{child}" }
-          else
-            keys << "#{category}::#{phrase}"
-          end
-        end
-      end
-      keys
-    end
-
-    def auto_flush_quietly
-      flush_pending if has_pending?
-    rescue StandardError => e
-      @logger&.warn("langsys auto-flush failed: #{e.message}")
     end
   end
 end

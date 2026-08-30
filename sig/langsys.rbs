@@ -150,6 +150,15 @@ module Langsys
     def project: () -> Project
     def key_type: () -> String
     def can_write?: (?refresh: bool) -> bool
+    # REG-2: has the current burst settled?
+    def flush_due?: () -> bool
+    # REG-8: current backoff delay in seconds, nil when not backing off.
+    def retry_delay: () -> Float?
+    # GATE-5: true only once the server confirmed acceptance.
+    def registered?: (String?, String) -> bool
+    def flush_if_due: () -> Hash[String, untyped]
+    # REG-3: best-effort end-of-context flush; never raises.
+    def flush_on_shutdown: () -> Hash[String, untyped]
     def write_signal: () -> bool?
     def reset_write_decision!: () -> Client
 
@@ -164,7 +173,7 @@ module Langsys
     def pending_phrases: () -> Array[Hash[String, String]]
     def pending_content_blocks: () -> Array[Hash[String, untyped]]
     def clear_pending: () -> void
-    def flush_pending: () -> Hash[String, untyped]
+    def flush_pending: (?refresh: bool) -> Hash[String, untyped]
 
     def register_phrases: (Array[untyped]) -> Array[untyped]
     def register_content_block: (String, Array[String], ?category: String?, ?custom_id: String?, ?label: String?) -> Hash[String, untyped]

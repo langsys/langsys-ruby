@@ -16,11 +16,7 @@ Metrics/AbcSize:
   Max: 40
 
 Metrics/ClassLength:
-  # Raised from 250 by the 838 wave: Client is the composition root and now also owns the
-  # GATE-1/GATE-8 write-decision resolution and the CID-3 legacy-lookup guard. Splitting
-  # it to satisfy a line count would scatter one rule family across several files, each
-  # holding a branch of a decision that has to be read as a whole.
-  Max: 300
+  Max: 250
 
 Metrics/ModuleLength:
   Max: 150
