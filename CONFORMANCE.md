@@ -160,17 +160,17 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | ICU-4 | **implemented** | mock | `icu_conformance` ICU-4 block (5): names every defaulted argument and the locale, fires for plural and select, silent without a logger, deduped on the **(template, locale) pair** matching PHP and JS, and notifies again for a different locale. |
 | ICU-5 | **implemented** | mock | The discriminating Polish guard (3): `few` at n=3, `many` at n=5, `one` at n=1, distinct branch text. Its power is **provable by mutation** — degrading the renderer to one/other turns these red — which is the falsifiable claim; plus 3 mixed-node examples proving recovery rewrites only the missing node. |
 | TOK-1 | **implemented** | contract | `tok_conformance` TOK-1 block. The spec's own test (one sentence in script/style/template/noscript plus once in ordinary markup → exactly one phrase) plus a per-element example. **`<template>` is a real vector here, unlike in the JS family**: parse5 hangs template content off a separate fragment so a walker emits nothing either way, but libxml2 puts it in the tree, so omitting it from the exclusion list would leak. Excluded by element NAME — see the note below on why the previous pass was accidental. |
-| TOK-2 | **implemented** | contract | All three vectors, written as escapes never literals: internal `U+00A0` collapsing to the same id as `U+0020`; leading **and** trailing, which a collapse-only fix leaves behind; and a whitespace-only node producing **no** token, which is the count case that moves block ids. Control: text that genuinely differs keeps two ids. Fixture rows `nbsp-in-text`, `attr-nbsp`, `line-separators`. |
+| TOK-2 | **implemented** | contract | **Four** token paths, not three: the collapse, the re-emit lead/trail detector, `<title>`, and `meta[content]` — the last found by review because it neither collapsed nor trimmed, so a grep for the wrong handling could not see it. All three vectors, written as escapes never literals: internal `U+00A0` collapsing to the same id as `U+0020`; leading **and** trailing, which a collapse-only fix leaves behind; and a whitespace-only node producing **no** token, which is the count case that moves block ids. Control: text that genuinely differs keeps two ids. Fixture rows `nbsp-in-text`, `attr-nbsp`, `line-separators`. |
 | TOK-3 | **implemented** | contract | Twenty-seven attributes, verified **literally** against `langsys-php-sdk src/Html/HtmlParser.php:26-60` and against the spec text — identical in content *and* order, diffed rather than eyeballed. Plus the spec's test: three listed attributes on one element produce three phrases in list order, two unlisted produce none. |
 | TOK-4 | **implemented** | contract | The same string as a text node and as a `title` yields one id, and `U+00A0` collapses inside an attribute value too. Fixture rows `attr-multiline`, `attr-nbsp`. |
 | TOK-5 | **implemented** | mock | `{name}` and `%name%` interpolate to the same output, including a template mixing both. An unrecognised form is left literal. **Deliberate narrowing:** `%name%` is substituted only when the argument is supplied — ordinary prose is full of percent signs and a greedy rule turns `50%off20%` into a slot — so an unmatched escape stays exactly as authored rather than being rewritten into a gap marker. |
-| MARK-1 | **implemented** | mock | The rendered host carries `data-ls-contentblock`, stamped whether or not the block resolved, because the identity is wanted most when it did not. Asserted by **re-deriving** the id with the tokenizer and comparing — reading back the attribute the renderer just wrote would prove only that it was written. |
-| MARK-2 | **implemented** | mock | Both `data-ls-*` and `data-langsys-*` are accepted on read (category and contentblock); the writer emits `data-ls-*`. Both directions tested, not one asserted and one assumed: a host in either spelling is recognised and not re-split into a second registration. |
+| MARK-1 | **implemented** | mock | **Both halves.** A rendered block host carries `data-ls-contentblock`, stamped whether or not the block resolved, since the identity is wanted most when it did not; asserted by **re-deriving** the id with the tokenizer rather than reading back what the renderer just wrote. A rendered single-phrase host carries `data-ls-phrase` naming the SOURCE phrase, not the rendered text — that half was missing when this row first claimed `implemented`, found by review. |
+| MARK-2 | **implemented** | mock | All three suffixes in both spellings: `category`, `contentblock` and **`phrase`** — the last is the one the rule's own Test names, and it was missing when this row first claimed `implemented` with "both directions tested", which was true only of the other two. A marked host is left whole: not re-split, and nothing queued for its text, with an unmarked control proving the recognition is not just "tokenize nothing". |
 | SRV-1 | **implemented** | mock | Asserted on the **served bytes**, not a post-hydration DOM. Control phrase absent from the catalog emits the base language and is reported as a miss, which is what separates this from rendering a catalog that happened to be complete. |
 | SRV-2 | **implemented** | mock | Two **concurrent** renders (`it-IT`/`de-DE`, 30 interleaved iterations each on separate threads) each carry only their own locale's text; plus a second client proving no process-global holds per-request state. Sequential runs would prove nothing — the failure is the interleave. |
 | SRV-3 | **implemented** | mock | Three assertions, per the rule: the registration POST does **not** occur during the render (order of events, not merely that collection happens), a read-only key pushes nothing, and a write key on the same render pushes — the positive control without which the read-only half passes against an SDK that never pushes at all. |
-| SRV-4 | n/a (profile: browser) | none | The hydration seed is the JS half: this SDK serves HTML and has no client bundle to hand a catalog to. |
-| SRV-5 | n/a (profile: browser) | none | Per-child capture is the JS component half; there is no component tree here. |
+| SRV-4 | **not implemented** | none | **Rowed against the rule body, not the brief.** The Profiles line names `server` FIRST — only the synchronous seed belongs to the browser core — so this does not fall away on profile, and my earlier `n/a (profile: browser)` claimed a pass for work that does not exist. Verified: nothing in `lib/` emits a catalog for a client to pick up (`grep -riE '__LANGSYS|window\.|hydrat|<script'` finds only a TOK-1 comment). `get_translations` is public so an integrator could serialise it, but this SDK neither does nor documents it. Matching langsys-php, which holds the same row at `not implemented` pending a normative clarification: the rule's author has confirmed it over-binds a page-translation server SDK, and `translate_page` emits terminal HTML that nothing hydrates. Held here until the rule is corrected, that being the more honest of the two while the published text reads as it does. |
+| SRV-5 | n/a (architecture) | none | **Also not for the profile reason** — the Profiles line names `server`, so this falls away on MECHANISM. SRV-5 governs component child capture: a re-entrant render registering 2^n copies of one miss, or a `Suspense` fallback keying a block on a loading spinner. This SDK walks a DOM once and has no component model, no re-entrant render and no lazy children, so neither failure has a site here. The mechanism is named so the claim is checkable rather than asserted — and unlike a profile row, it can rot under us if a component surface is ever added. |
 | CID-1 | **implemented** | contract | `cid_conformance` — 13/13 hash **and** 13/13 `serialized_hex` bytes, asserted through the same function the id is hashed from. Plus explicit slash / non-ASCII / raw-U+2028 / UTF-8-bytes / order-sensitivity cases. |
 | CID-2 | **implemented** | contract | Both halves: the function coalesces `nil` **and** the `__uncategorized__` sentinel to `''`, and a caller-level example proves the content-block path (which passes the sentinel) hashes as `''`. |
 | CID-3 | **implemented** | mock | Both pipe-join spellings resolve — the empty-category form **and** the `__uncategorized__` sentinel form, most-likely-first and deduped, mirroring PHP's `legacyCustomIds`. Canonical id preferred when both exist; only the canonical id is ever emitted; tolerance shipped in the same change as the new hash. **The JS code-unit shape is deliberately not tolerated** — see below. |
@@ -272,6 +272,14 @@ sed -n '26,60p' ../langsys-php-sdk/src/Html/HtmlParser.php | grep -oE "'[a-z-]+'
 Both fixture blobs are asserted by the suite, so a vendored copy that drifts fails the
 build rather than the reader.
 
+**On `rbs -I sig validate`, and what it does not prove.** It checks the signatures are
+internally well-formed; it does not check them against the implementation. Until this lane
+`sig/langsys.rbs` declared none of `Html`, `Interpolate` or `Cldr`, so citing a green
+`rbs` run as evidence about a tokenizer change was citing a check that could not have
+failed — the same vacuous-guard shape this repo has already recorded twice. The three
+modules are now declared, which makes the run meaningful for what it covers; a green
+`rbs` still means "these signatures are coherent", never "the code matches them".
+
 ## On TOK-1, and why the previous pass was accidental
 
 `<script>` and `<style>` produced no tokens before this lane, and the fixture rows for both
@@ -288,14 +296,23 @@ records, and it is the one that proves the pass on the other two was luck.
 The exclusion is now by element name, and the test asserts the predicate directly rather
 than only the outcome.
 
-**Two rows in this file were wrong before this lane, and both are corrected above rather
-than quietly re-graded.** `script` and `style` were passing TOK-1's intent by accident of
-libxml2's CDATA modelling, with no exclusion anywhere in the content-block path — a pass
-that would have vanished the moment the parser changed. And the tokenizer's whitespace
-class was `\s`, which is ASCII-only in Ruby, so every `U+00A0` and `U+2028`/`U+2029` in
-customer content minted an id no other SDK could reproduce. Four of the nineteen shared
-fixture rows measured as divergent on first run; all four matched `langsys-php` exactly,
-which is what the fixture's per-lane columns are for.
+**Two CODE defects predate this lane. No row was re-graded, and an earlier draft of this
+paragraph said otherwise — there were no TOK, MARK or SRV rows in this file before this
+lane, because v7 had 67 rules and no TOK family at all.** What was wrong was the
+implementation, not the record of it.
+
+`script` and `style` were passing TOK-1's intent by accident of libxml2's CDATA modelling,
+with no exclusion anywhere in the content-block path — a pass that would have vanished the
+moment the parser changed. And the tokenizer's whitespace class was `\s`, ASCII-only in
+Ruby, so every `U+00A0` and `U+2028`/`U+2029` in customer content minted an id no other SDK
+could reproduce. Four of the nineteen shared fixture rows measured divergent on first run;
+all four matched `langsys-php` exactly, which is what the fixture's per-lane columns are for.
+
+**A fourth token path was missed entirely and found by review**, not by me: `translate_meta`
+handed `meta["content"]` to the translator raw. It is worth recording why my search could not
+see it — I grepped for the whitespace handling that was *wrong* (`\s`, `strip`, `split`), and
+this path did none of them. TOK-2 says find every site that turns a text node into a token;
+the sites that do nothing at all are invisible to a search shaped like that one.
 
 ## Measured, not changed: `svg`, `math`, and the two paths
 
@@ -308,14 +325,23 @@ disagree about them:
 | `style` | clean (now by exclusion, previously by CDATA accident) | clean |
 | `noscript` | **leaked** before this lane; now clean | clean |
 | `template` | **leaked** before this lane; now clean | clean |
-| `svg` | **leaks** `Label` from `<svg><text>Label</text></svg>` | clean |
-| `math` | **leaks** `Label` from `<math><mi>Label</mi></math>` | clean |
+| `svg` | **leaks** `Label` from `<svg><text>Label</text></svg>` | **leaks when nested** — see below |
+| `math` | **leaks** `Label` from `<math><mi>Label</mi></math>` | **leaks when nested** — see below |
 
-`Page::SKIP_ELEMENTS` drops `svg` and `math`; the block path does not. The four TOK-1 names
-are now aligned across both. **`svg` and `math` are left as they are, deliberately** — no
-rule names them, aligning the paths would change ids for any block containing inline SVG
-text, and which way to align is a fleet decision rather than this lane's. Reported rather
-than settled.
+**Correction: "page path: clean" was true only at the TOP LEVEL, and an earlier version of
+this table said it without that qualifier.** `SKIP_ELEMENTS` guards the element walk, but a
+leaf block's inner HTML is handed to `extract_phrases`, which has its own exclusion list —
+and `svg`/`math` are deliberately not on it. Measured:
+`<p>Hello <b>there</b> <svg><text>Label</text></svg></p>` queues the block
+`["Hello", "there", "Label"]` on the page path, `math` likewise. So the two paths agree on
+nested SVG (both leak) and disagree only on a top-level one. The fleet decision below was
+being deferred on a measurement that understated it.
+
+`Page::SKIP_ELEMENTS` drops top-level `svg` and `math`; neither tokenizing path drops a
+nested one. The four TOK-1 names are now aligned across both paths. **`svg` and `math` are
+left exactly as they are, deliberately** — no rule names them, and aligning would change the
+id of every block containing inline SVG text. Which way to align is a fleet decision, not
+this lane's. Reported rather than settled, now on a correct measurement.
 
 ## Measured, not adopted: the `U+FEFF` delta
 
@@ -353,15 +379,16 @@ worth reading is one that cannot.
 | implemented | 45 |
 | provisional | 2 |
 | partial | 1 |
-| not implemented | 2 |
-| n/a — profile | 28 |
-| n/a — architecture | 1 |
+| not implemented | 3 |
+| n/a — profile | 26 |
+| n/a — architecture | 2 |
 | **total** | **79** |
 
 `provisional` is CAT-1 and CAT-2 — implemented, but resting on mocked transport only, which
 CONF-2 does not count as proof. `not implemented` is GATE-7 (no coverage-property test that
-every detection path feeds exactly one lane) and CONF-3 (mutation proofs are run and
-reported each wave but are not a committed, re-runnable suite).
+every detection path feeds exactly one lane), CONF-3 (mutation proofs are run and reported
+each wave but are not a committed, re-runnable suite) and SRV-4 (no client hand-off exists;
+see its row). `n/a — architecture` is GATE-6 and SRV-5, each on a stated mechanism.
 
 **The two kinds of `n/a` are kept apart deliberately.** `n/a — profile` means the rule
 addresses a different kind of SDK and nothing here could satisfy it; it is stable, and goes

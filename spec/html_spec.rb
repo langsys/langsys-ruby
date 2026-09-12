@@ -66,8 +66,12 @@ RSpec.describe "Langsys::Client HTML translation" do
       page = "<html><head><title>Welcome</title></head><body><h1>Hello</h1></body></html>"
       out = client.translate_page(page)
       expect(out).to include("<title>Bienvenido</title>")
-      expect(out).to include("<h1>Hola</h1>")
       expect(out).to include('lang="es-ES"')
+      # MARK-1: a rendered phrase host carries the identity it was rendered FROM — the
+      # source phrase, not the rendered text — so the id is readable from the DOM.
+      host = Nokogiri::HTML(out).at_css("h1")
+      expect(host.text).to eq("Hola")
+      expect(host["data-ls-phrase"]).to eq("Hello")
     end
 
     it "honors data-langsys-category and translate=no" do

@@ -25,6 +25,11 @@ module ConformanceDoc
   # is not a check. Lives here, not in the describe block, for the reason above.
   SPEC_RULE_COUNT = 79
 
+  # The only profiles this SDK is NOT. A rule whose Profiles line names `server` or `all`
+  # binds here and can never be skipped on profile grounds — it is either implemented, or
+  # honestly not, or n/a on a stated mechanism.
+  NA_PROFILES = ["n/a (profile: browser)", "n/a (profile: binding)"].freeze
+
   module_function
 
   # A rules-table row: "| GATE-1 | implemented | live | … |". The id cell may hold a range
@@ -80,8 +85,18 @@ RSpec.describe "CONFORMANCE.md" do
   end
 
   it "uses only the documented status vocabulary" do
-    unknown = tally.keys.reject { |s| ConformanceDoc::ALLOWED.include?(s) || s.start_with?("n/a (profile:") }
+    unknown = tally.keys.reject { |s| ConformanceDoc::ALLOWED.include?(s) || ConformanceDoc::NA_PROFILES.include?(s) }
     expect(unknown).to be_empty, "unrecognised status(es): #{unknown.inspect}"
+  end
+
+  it "only claims profile-n/a for a profile this SDK is not" do
+    # The previous check accepted any `n/a (profile: …)` string, which let SRV-4 and SRV-5
+    # be rowed `n/a (profile: browser)` against Profiles lines naming `server` first —
+    # a pass claimed for work that does not exist. This SDK is `server` + `all`, so
+    # `server` and `all` are never valid grounds for it to skip a rule.
+    offenders = tally.keys.select { |k| k.start_with?("n/a (profile:") } - ConformanceDoc::NA_PROFILES
+    expect(offenders).to be_empty,
+                         "profile-n/a must name browser or binding, got: #{offenders.inspect}"
   end
 
   it "has a summary whose counts match the rules table" do

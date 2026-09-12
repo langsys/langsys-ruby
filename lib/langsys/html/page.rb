@@ -46,6 +46,17 @@ module Langsys
         nil
       end
 
+      # A copy of +element+ with any already-identified descendant host removed, so its
+      # text does not join the surrounding block's phrase array. Order matters to a
+      # block's id, so a host that another SDK owns must not silently shift it.
+      def self.without_marked_hosts(element)
+        copy = element.dup
+        copy.xpath(".//*").each do |descendant|
+          descendant.remove unless marker_attr(descendant, "phrase").nil?
+        end
+        copy
+      end
+
       def self.content_block_marked?(element)
         value = marker_attr(element, "contentblock")
         return false if value.nil?
@@ -98,8 +109,16 @@ module Langsys
       end
 
       def translate_meta(meta)
-        content = meta["content"]
-        return if content.nil? || content.empty?
+        # TOK-2/TOK-4: meta content is a token path like any other. It was handed to
+        # translate raw — neither collapsed nor trimmed — so description/keywords/author
+        # and the og:/twitter: properties minted ids no other SDK could reproduce.
+        #
+        # Worth recording how it hid: a search for the whitespace handling that was WRONG
+        # (`\s`, `strip`, `split`) cannot find a path that does none of them. TOK-2 says
+        # find every site that turns a text node into a token; this is the case where
+        # "every site" means the ones doing nothing at all.
+        content = Html.normalize_whitespace(meta["content"])
+        return if content.empty?
 
         name = meta["name"] || ""
         prop = meta["property"] || ""
@@ -132,6 +151,8 @@ module Langsys
           tag = child.name.downcase
           next if SKIP_ELEMENTS.include?(tag)
           next if child["translate"] == "no" || Html.to_s_or_nil(child["data-notrans"])
+          # MARK-2: already identified by another SDK's renderer — leave it whole.
+          next if phrase_marked?(child)
 
           effective = effective_category(child, inherited)
 
@@ -148,7 +169,7 @@ module Langsys
       def walk_block(child, effective)
         return walk(child, effective) if contains_nested_blocks?(child)
 
-        inner = Html.inner_html(child)
+        inner = Html.inner_html(Page.without_marked_hosts(child))
         phrases = Html.extract_phrases(inner, @attrs)
         return if phrases.empty?
 
@@ -157,6 +178,11 @@ module Langsys
         if phrases.length == 1 && phrases[0] == text
           category = item_cat == UNCATEGORIZED ? nil : item_cat
           Html.apply_element(child, { text => @client.translate(text, category: category, locale: @locale) }, @attrs)
+          # MARK-1's other half: a rendered phrase host carries data-ls-phrase, the same
+          # way a rendered block carries data-ls-contentblock. Stamped after the
+          # translation so the attribute names the SOURCE phrase, which is the identity,
+          # not the rendered text.
+          child["data-ls-phrase"] = text
         else
           apply_or_queue_block(child, item_cat, phrases, inner)
         end
@@ -208,6 +234,13 @@ module Langsys
 
       def content_block_attr?(element)
         Page.content_block_marked?(element)
+      end
+
+      # MARK-2: a host already carrying a phrase identity — in either spelling — has been
+      # rendered by another SDK and is already registered. Walking into it splits a block
+      # that has an id and registers its text a second time.
+      def phrase_marked?(element)
+        !Page.marker_attr(element, "phrase").nil?
       end
 
       def contains_nested_blocks?(element)

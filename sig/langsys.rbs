@@ -207,4 +207,64 @@ module Langsys
     def clear_cache: (?String?) -> void
     def close: () -> bool
   end
+
+  # -- HTML tokenizer + page translator (TOK-1..4, MARK-1/2) ----------------
+
+  module Html
+    # TOK-2/TOK-4: Unicode-aware. Ruby's \s is ASCII-only and leaves U+00A0 and
+    # U+2028/U+2029 in the token.
+    WHITESPACE: Regexp
+    # TOK-1: excluded by element NAME, not by how the parser models the children.
+    NON_TOKENIZED_ELEMENTS: Array[String]
+    # TOK-3: twenty-seven, and the order is normative.
+    DEFAULT_TRANSLATABLE_ATTRIBUTES: Array[String]
+
+    def self.ensure_nokogiri!: () -> bool
+    def self.normalize_whitespace: (String?) -> String
+    def self.excluded_from_tokenizing?: (String | Symbol) -> bool
+    def self.extract_phrases: (String?, ?Array[String]?) -> Array[String]
+    def self.apply_block_translations: (String?, Hash[String, untyped], ?Array[String]?) -> String
+    def self.apply_element: (untyped, Hash[String, untyped], ?Array[String]?) -> void
+    def self.inner_html: (untyped) -> String
+    def self.text_content: (untyped) -> String
+    def self.parse_fragment: (String) -> untyped
+    def self.skip?: (untyped) -> bool
+
+    class Page
+      SKIP_ELEMENTS: Set[String]
+      BLOCK_ELEMENTS: Set[String]
+      # MARK-2: both spellings accepted on read; writers emit data-ls-*.
+      MARKER_PREFIXES: Array[String]
+
+      def self.translate: (untyped, String?, ?String?, ?Hash[String, untyped]?) -> String
+      def self.marker_attr: (untyped, String) -> String?
+      def self.content_block_marked?: (untyped) -> bool
+      def self.without_marked_hosts: (untyped) -> untyped
+    end
+  end
+
+  # -- interpolation --------------------------------------------------------
+
+  module Interpolate
+    SIMPLE_SLOT: Regexp
+    # TOK-5: %name% accepted as the escape for {name}.
+    PERCENT_SLOT: Regexp
+    SELECTORS: Array[String]
+
+    def self.icu?: (String) -> bool
+    def self.call: (String, Hash[untyped, untyped]?, ?String, ?logger: untyped?) -> String
+    def self.simple: (String, Hash[untyped, untyped], String) -> String
+  end
+
+  # -- locale-aware formatting ----------------------------------------------
+
+  module Cldr
+    DATE_STYLES: Array[String]
+
+    def self.format_value: (untyped, String?) -> String
+    def self.format_number: (Numeric, String?) -> String
+    def self.format_date: (untyped, String?, ?String) -> String
+    def self.plural_category: (Numeric, String?, ordinal: bool) -> String
+    def self.cldr_locale: (String?) -> Symbol
+  end
 end

@@ -84,8 +84,8 @@ RSpec.describe "TOK conformance" do
     # beside it, so a reviewer cannot see what the test pins and anyone tidying
     # whitespace turns it into an assertion about ordinary spaces that still passes.
     it "collapses an internal U+00A0 to the same token as U+0020" do
-      nbsp = Langsys::Html.extract_phrases("<p>Buy now</p>")
-      plain = Langsys::Html.extract_phrases("<p>Buy now</p>")
+      nbsp = Langsys::Html.extract_phrases("<p>Buy\u00A0now</p>")
+      plain = Langsys::Html.extract_phrases("<p>Buy\u0020now</p>")
       expect(nbsp).to eq(plain)
       expect(Langsys.generate_custom_id("UI", nbsp)).to eq(Langsys.generate_custom_id("UI", plain))
     end
@@ -93,7 +93,7 @@ RSpec.describe "TOK conformance" do
     it "strips a LEADING and TRAILING U+00A0, which a collapse-only fix leaves behind" do
       # This is the vector that tells a finished implementation from a half-finished one:
       # fixing the collapse alone passes the internal pair and still retains these.
-      tokens = Langsys::Html.extract_phrases("<p> Buy now </p>")
+      tokens = Langsys::Html.extract_phrases("<p>\u00A0Buy\u0020now\u00A0</p>")
       expect(tokens).to eq(["Buy now"])
       expect(CanonFixture.codepoints(tokens.first)).not_to include("U+00A0")
     end
@@ -116,9 +116,9 @@ RSpec.describe "TOK conformance" do
       # here silently reflows text whose padding happens to be a no-break space: the
       # token normalises to "Buy now", the translation goes back without its leading
       # space, and the sentence closes up against whatever precedes it.
-      nbsp = Langsys::Html.apply_block_translations("<p>\u00A0Buy now\u00A0</p>",
+      nbsp = Langsys::Html.apply_block_translations("<p>\u00A0Buy\u0020now\u00A0</p>",
                                                     { "Buy now" => "Comprar ahora" })
-      plain = Langsys::Html.apply_block_translations("<p> Buy now </p>",
+      plain = Langsys::Html.apply_block_translations("<p>\u0020Buy\u0020now\u0020</p>",
                                                      { "Buy now" => "Comprar ahora" })
       expect(nbsp).to eq(plain)
       expect(nbsp).to eq("<p> Comprar ahora </p>")
@@ -137,8 +137,8 @@ RSpec.describe "TOK conformance" do
     end
 
     it "keeps two ids for text that genuinely differs (control)" do
-      a = Langsys::Html.extract_phrases("<p>Buy now</p>")
-      b = Langsys::Html.extract_phrases("<p>Buy later</p>")
+      a = Langsys::Html.extract_phrases("<p>Buy\u0020now</p>")
+      b = Langsys::Html.extract_phrases("<p>Buy\u0020later</p>")
       expect(Langsys.generate_custom_id("UI", a)).not_to eq(Langsys.generate_custom_id("UI", b))
     end
   end
@@ -170,8 +170,8 @@ RSpec.describe "TOK conformance" do
 
   describe "TOK-4 — attribute values collapse internal whitespace exactly as text nodes do" do
     it "gives the same id to the same string in a text node and in a title" do
-      text = Langsys::Html.extract_phrases("<p>Buy   now</p>")
-      attr = Langsys::Html.extract_phrases('<span title="Buy   now">x</span>')
+      text = Langsys::Html.extract_phrases("<p>Buy\u0020\u0020\u0020now</p>")
+      attr = Langsys::Html.extract_phrases("<span title=\"Buy\u0020\u0020\u0020now\">x</span>")
       expect(attr.first).to eq(text.first)
     end
 
@@ -202,8 +202,27 @@ RSpec.describe "TOK conformance" do
     end
 
     it "does not turn ordinary percentages into slots" do
+      # A single assertion, not an `.or` chain: the alternation's second branch was
+      # unreachable, and a matcher that cannot fail on one side is not a check.
+      #
+      # Measured rather than assumed, and the measurement corrected me: the span between
+      # the signs here is `off20`, not `off`, so supplying an `off` argument changes
+      # nothing. That is the substitution being narrow in the direction that matters —
+      # prose survives untouched.
       expect(Langsys::Interpolate.call("50%off20% today", { off: "X" }, "en-US"))
-        .to eq("50%off20% today").or eq("50Xoff20% today").and(satisfy { |r| !r.include?("{") })
+        .to eq("50%off20% today")
+    end
+
+    it "substitutes the escape when the span between the signs IS an argument (control)" do
+      # Without this, "prose is left alone" is indistinguishable from an escape that never
+      # fires at all.
+      expect(Langsys::Interpolate.call("50%off20% today", { "off20" => "X" }, "en-US"))
+        .to eq("50X today")
+    end
+
+    it "leaves a percentage alone when nothing between the signs is an argument" do
+      expect(Langsys::Interpolate.call("50% off, 20% more", { name: "Sarah" }, "en-US"))
+        .to eq("50% off, 20% more")
     end
 
     it "handles a template mixing both forms" do
