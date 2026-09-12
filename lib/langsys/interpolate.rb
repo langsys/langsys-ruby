@@ -3,6 +3,8 @@
 require "date"
 require "set"
 
+require_relative "cldr"
+
 module Langsys
   # Parameter interpolation with locale-aware CLDR formatting and an ICU subset.
   #
@@ -21,7 +23,15 @@ module Langsys
     # +[,}]+ also matches style-less +{n, number}+.
     ICU_PATTERN = /\{[^{}]+,\s*(?:plural|select|selectordinal|number|date|time)\s*[,}]/
     SIMPLE_SLOT = /\{([^{},]+)\}/
-    DATE_STYLES = %w[short medium long full].freeze
+    # TOK-5: `%name%` is accepted as an escape for `{name}`, because `{` is an expression
+    # delimiter in several of the template compilers we ship bindings for and an author
+    # who cannot get `{name}` past their own build needs a form that survives it.
+    #
+    # Deliberately narrow, and only substituted when the argument is actually supplied:
+    # ordinary prose is full of percent signs, and a greedy rule turns "50%off20%" into a
+    # slot. An unmatched `%name%` is therefore left exactly as authored rather than
+    # rewritten into a gap marker — visible either way, and it cannot corrupt real text.
+    PERCENT_SLOT = /%([A-Za-z_][A-Za-z0-9_.-]*)%/
     # Argument kinds that carry branches, and so can recover to `other` (ICU-1).
     SELECTORS = %w[select plural selectordinal].freeze
 
@@ -86,14 +96,27 @@ module Langsys
     # -- simple {name} interpolation -----------------------------------------
 
     def simple(template, params, locale)
-      template.gsub(SIMPLE_SLOT) do
+      out = template.gsub(SIMPLE_SLOT) do
         key = Regexp.last_match(1).strip
         found, value = fetch_param(params, key)
         if !found || value.nil?
           "{#{key}}"
         else
-          format_value(value, locale)
+          Cldr.format_value(value, locale)
         end
+      end
+      substitute_percent_slots(out, params, locale)
+    end
+
+    # TOK-5's escape form. Runs after the brace pass so a template mixing both behaves
+    # identically to one using either.
+    def substitute_percent_slots(text, params, locale)
+      return text unless text.include?("%")
+
+      text.gsub(PERCENT_SLOT) do
+        key = Regexp.last_match(1)
+        found, value = fetch_param(params, key)
+        found && !value.nil? ? Cldr.format_value(value, locale) : Regexp.last_match(0)
       end
     end
 
@@ -106,50 +129,6 @@ module Langsys
       else
         [false, nil]
       end
-    end
-
-    def format_value(value, locale)
-      case value
-      when true then "true"
-      when false then "false"
-      when Date, Time, DateTime then format_date(value, locale)
-      when Integer, Float then format_number(value, locale)
-      else value.to_s
-      end
-    end
-
-    # -- CLDR formatting (via twitter_cldr, defensively) ---------------------
-
-    def cldr_locale(locale)
-      (locale || "en").to_s.split(/[-_]/).first.downcase.to_sym
-    rescue StandardError
-      :en
-    end
-
-    def format_number(value, locale)
-      # A whole-valued Float formats as an integer ("3", not "3.0") — matching the other SDKs.
-      value = value.to_i if value.is_a?(Float) && value == value.to_i
-      require "twitter_cldr"
-      value.localize(cldr_locale(locale)).to_s
-    rescue StandardError
-      value.to_s
-    end
-
-    def format_date(value, locale, style = "medium")
-      style = "medium" unless DATE_STYLES.include?(style)
-      require "twitter_cldr"
-      localized = value.localize(cldr_locale(locale))
-      localized.public_send("to_#{style}_s")
-    rescue StandardError
-      value.respond_to?(:iso8601) ? value.iso8601 : value.to_s
-    end
-
-    def plural_category(number, locale, ordinal:)
-      require "twitter_cldr"
-      type = ordinal ? :ordinal : :cardinal
-      TwitterCldr::Formatters::Plurals::Rules.rule_for(number, cldr_locale(locale), type).to_s
-    rescue StandardError
-      number == 1 ? "one" : "other"
     end
 
     # -- ICU render -----------------------------------------------------------
@@ -171,7 +150,7 @@ module Langsys
       return text.gsub("#", hash_literal) if plural_value.nil? && hash_literal
       return text if plural_value.nil?
 
-      text.gsub("#", format_number(plural_value - offset, locale))
+      text.gsub("#", Cldr.format_number(plural_value - offset, locale))
     end
 
     def render_arg(arg, ctx)
@@ -179,9 +158,9 @@ module Langsys
       return recover(arg, ctx) if !found || value.nil?
 
       case arg.kind
-      when nil then format_value(value, ctx.locale)
-      when "number" then format_number(value, ctx.locale)
-      when "date", "time" then format_date(value, ctx.locale, arg.style || "medium")
+      when nil then Cldr.format_value(value, ctx.locale)
+      when "number" then Cldr.format_number(value, ctx.locale)
+      when "date", "time" then Cldr.format_date(value, ctx.locale, arg.style || "medium")
       when "select" then render_select(arg, value, ctx)
       else render_plural(arg, value, ctx)
       end
@@ -217,7 +196,7 @@ module Langsys
       exact = arg.options["=#{int_key(number)}"]
       return render(exact, ctx, number, arg.offset, nil) unless exact.nil?
 
-      category = plural_category(number - arg.offset, ctx.locale, ordinal: arg.kind == "selectordinal")
+      category = Cldr.plural_category(number - arg.offset, ctx.locale, ordinal: arg.kind == "selectordinal")
       branch = arg.options[category] || arg.options["other"] || []
       render(branch, ctx, number, arg.offset, nil)
     end

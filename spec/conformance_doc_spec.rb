@@ -18,6 +18,13 @@ module ConformanceDoc
   ALLOWED = ["implemented", "provisional", "provisional (no test)", "partial",
              "not implemented", "n/a (architecture)", "waived"].freeze
 
+  # Spec v8 at blob b657b490f07615b889081c0ac5244ec4bd73bf81 carries 79 rules:
+  #   git -C ../langsys2 cat-file blob b657b490 | grep -cE '^### [A-Z]+-[0-9]+ '
+  # Hard-coded rather than derived: the spec lives in a sibling repo that is not
+  # guaranteed present at test time, and a count degrading to "however many I could find"
+  # is not a check. Lives here, not in the describe block, for the reason above.
+  SPEC_RULE_COUNT = 79
+
   module_function
 
   # A rules-table row: "| GATE-1 | implemented | live | … |". The id cell may hold a range
@@ -67,7 +74,8 @@ RSpec.describe "CONFORMANCE.md" do
 
   it "grades every rule in the spec exactly once" do
     ids = graded.map(&:first)
-    expect(ids.size).to eq(67), "expected all 67 spec rules graded, found #{ids.size}"
+    expect(ids.size).to eq(ConformanceDoc::SPEC_RULE_COUNT),
+                        "expected all #{ConformanceDoc::SPEC_RULE_COUNT} rules graded, found #{ids.size}"
     expect(ids.tally.select { |_, n| n > 1 }).to be_empty
   end
 

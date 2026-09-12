@@ -29,6 +29,30 @@ module Langsys
       OG_PROPERTIES = %w[og:title og:description og:site_name].freeze
       TWITTER_PROPERTIES = %w[twitter:title twitter:description].freeze
 
+      # MARK-2: both spellings are accepted on READ; writers emit the data-ls-* one.
+      # The pages that mix them are the ordinary case, not an edge — a PHP-rendered page
+      # hosting a JS-rendered component is what a customer's site looks like — and a
+      # reader that knows one spelling walks straight into the other's host and splits a
+      # block that already has an id.
+      MARKER_PREFIXES = %w[data-ls- data-langsys-].freeze
+
+      # Read +suffix+ ("category", "contentblock", "phrase") in either spelling. The
+      # current spelling wins where a host carries both.
+      def self.marker_attr(element, suffix)
+        MARKER_PREFIXES.each do |prefix|
+          value = element["#{prefix}#{suffix}"]
+          return value unless value.nil?
+        end
+        nil
+      end
+
+      def self.content_block_marked?(element)
+        value = marker_attr(element, "contentblock")
+        return false if value.nil?
+
+        value != "" && value != "0" && value.to_s.downcase != "false"
+      end
+
       def self.translate(client, html, default_category = nil, selector_categories = nil)
         return html if html.nil? || html.empty?
 
@@ -62,8 +86,12 @@ module Langsys
         return if head.nil?
 
         title = head.at_xpath("./title")
-        if title && title.text.strip != ""
-          title.content = @client.translate(title.text.strip, category: @default_category, locale: @locale)
+        # Normalised, not stripped. A raw strip is ASCII-only, so a title padded with
+        # U+00A0 produced a phrase no other SDK would ever mint — a token path that trims
+        # without collapsing, which fixing the collapse alone does not reach (TOK-2).
+        title_text = title && Html.normalize_whitespace(title.text)
+        if title_text && !title_text.empty?
+          title.content = @client.translate(title_text, category: @default_category, locale: @locale)
         end
 
         head.xpath("./meta").each { |meta| translate_meta(meta) }
@@ -144,6 +172,10 @@ module Langsys
 
       def apply_or_queue_block(element, item_cat, phrases, inner)
         custom_id, block, available = @client.lookup_block(item_cat, phrases)
+        # MARK-1: the host carries the identity it was rendered from, whether or not the
+        # block resolved. An identity you cannot read off the DOM is one nobody can
+        # debug, and it is most wanted precisely when the block did NOT resolve.
+        element["data-ls-contentblock"] = custom_id
         if block
           Html.apply_element(element, block, @attrs)
         elsif available
@@ -166,7 +198,7 @@ module Langsys
         match = @selmap[element.path]
         return match[0] if match && match[1] # selector override
 
-        attr = element["data-langsys-category"]
+        attr = Page.marker_attr(element, "category")
         return attr if attr && !attr.empty?
         return inherited unless inherited.nil?
         return match[0] if match && !match[1] # selector, non-override
@@ -175,10 +207,7 @@ module Langsys
       end
 
       def content_block_attr?(element)
-        value = element["data-langsys-contentblock"]
-        return false if value.nil?
-
-        value != "" && value != "0" && value.downcase != "false"
+        Page.content_block_marked?(element)
       end
 
       def contains_nested_blocks?(element)

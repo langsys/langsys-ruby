@@ -4,11 +4,11 @@
 |---|---|
 | **SDK** | `langsys-ruby` (Ruby base SDK) |
 | **Profiles** | `all`, `server` |
-| **specVersion** | 7 |
-| **Spec revision read** | git `origin/main` `fabe22b2a54a06a6c7957b0ad06c52cc1274a4b5`, blob `docs/sdk-spec.mdx` `06ae105a0a1f7b5245ec32929f0b3885c63f0336`, fetched 2026-08-29T18:28:29Z |
+| **specVersion** | 8 |
+| **Spec revision read** | git `origin/feature/838_write_key_gating` `483f98fb9c22155fdd51e0946239556470f57936`, blob `docs/sdk-spec.mdx` `b657b490f07615b889081c0ac5244ec4bd73bf81`, read 2026-09-11. Re-derive with `git -C ../langsys2 ls-tree origin/feature/838_write_key_gating docs/sdk-spec.mdx`. Docs-site publication pending, so this rows against the blob. |
 | **SDK revision** | `feature/838_write_key_gating`, cut from `main` `27a2381` (the repo's only prior commit) |
-| **Suite** | 223 unit examples in 13 test files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
-| **Status** | Waves 1 and 2 delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
+| **Suite** | 300 unit examples in 15 test files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
+| **Status** | Waves 1, 2 and the canonicalization lane delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
 
 > **Per-rule revisions are not recorded and the omission is deliberate.** The template requires a
 > revision per claimed rule. Those hashes live in the docs system
@@ -159,6 +159,18 @@ transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evi
 | ICU-3 | **implemented** | mock | `icu_conformance` ICU-3 block (5): recursive recovery two levels down, `#` emitting `{argName}`, and a supplied argument still rendering inside a recovered branch. |
 | ICU-4 | **implemented** | mock | `icu_conformance` ICU-4 block (5): names every defaulted argument and the locale, fires for plural and select, silent without a logger, deduped on the **(template, locale) pair** matching PHP and JS, and notifies again for a different locale. |
 | ICU-5 | **implemented** | mock | The discriminating Polish guard (3): `few` at n=3, `many` at n=5, `one` at n=1, distinct branch text. Its power is **provable by mutation** — degrading the renderer to one/other turns these red — which is the falsifiable claim; plus 3 mixed-node examples proving recovery rewrites only the missing node. |
+| TOK-1 | **implemented** | contract | `tok_conformance` TOK-1 block. The spec's own test (one sentence in script/style/template/noscript plus once in ordinary markup → exactly one phrase) plus a per-element example. **`<template>` is a real vector here, unlike in the JS family**: parse5 hangs template content off a separate fragment so a walker emits nothing either way, but libxml2 puts it in the tree, so omitting it from the exclusion list would leak. Excluded by element NAME — see the note below on why the previous pass was accidental. |
+| TOK-2 | **implemented** | contract | All three vectors, written as escapes never literals: internal `U+00A0` collapsing to the same id as `U+0020`; leading **and** trailing, which a collapse-only fix leaves behind; and a whitespace-only node producing **no** token, which is the count case that moves block ids. Control: text that genuinely differs keeps two ids. Fixture rows `nbsp-in-text`, `attr-nbsp`, `line-separators`. |
+| TOK-3 | **implemented** | contract | Twenty-seven attributes, verified **literally** against `langsys-php-sdk src/Html/HtmlParser.php:26-60` and against the spec text — identical in content *and* order, diffed rather than eyeballed. Plus the spec's test: three listed attributes on one element produce three phrases in list order, two unlisted produce none. |
+| TOK-4 | **implemented** | contract | The same string as a text node and as a `title` yields one id, and `U+00A0` collapses inside an attribute value too. Fixture rows `attr-multiline`, `attr-nbsp`. |
+| TOK-5 | **implemented** | mock | `{name}` and `%name%` interpolate to the same output, including a template mixing both. An unrecognised form is left literal. **Deliberate narrowing:** `%name%` is substituted only when the argument is supplied — ordinary prose is full of percent signs and a greedy rule turns `50%off20%` into a slot — so an unmatched escape stays exactly as authored rather than being rewritten into a gap marker. |
+| MARK-1 | **implemented** | mock | The rendered host carries `data-ls-contentblock`, stamped whether or not the block resolved, because the identity is wanted most when it did not. Asserted by **re-deriving** the id with the tokenizer and comparing — reading back the attribute the renderer just wrote would prove only that it was written. |
+| MARK-2 | **implemented** | mock | Both `data-ls-*` and `data-langsys-*` are accepted on read (category and contentblock); the writer emits `data-ls-*`. Both directions tested, not one asserted and one assumed: a host in either spelling is recognised and not re-split into a second registration. |
+| SRV-1 | **implemented** | mock | Asserted on the **served bytes**, not a post-hydration DOM. Control phrase absent from the catalog emits the base language and is reported as a miss, which is what separates this from rendering a catalog that happened to be complete. |
+| SRV-2 | **implemented** | mock | Two **concurrent** renders (`it-IT`/`de-DE`, 30 interleaved iterations each on separate threads) each carry only their own locale's text; plus a second client proving no process-global holds per-request state. Sequential runs would prove nothing — the failure is the interleave. |
+| SRV-3 | **implemented** | mock | Three assertions, per the rule: the registration POST does **not** occur during the render (order of events, not merely that collection happens), a read-only key pushes nothing, and a write key on the same render pushes — the positive control without which the read-only half passes against an SDK that never pushes at all. |
+| SRV-4 | n/a (profile: browser) | none | The hydration seed is the JS half: this SDK serves HTML and has no client bundle to hand a catalog to. |
+| SRV-5 | n/a (profile: browser) | none | Per-child capture is the JS component half; there is no component tree here. |
 | CID-1 | **implemented** | contract | `cid_conformance` — 13/13 hash **and** 13/13 `serialized_hex` bytes, asserted through the same function the id is hashed from. Plus explicit slash / non-ASCII / raw-U+2028 / UTF-8-bytes / order-sensitivity cases. |
 | CID-2 | **implemented** | contract | Both halves: the function coalesces `nil` **and** the `__uncategorized__` sentinel to `''`, and a caller-level example proves the content-block path (which passes the sentinel) hashes as `''`. |
 | CID-3 | **implemented** | mock | Both pipe-join spellings resolve — the empty-category form **and** the `__uncategorized__` sentinel form, most-likely-first and deduped, mirroring PHP's `legacyCustomIds`. Canonical id preferred when both exist; only the canonical id is ever emitted; tolerance shipped in the same change as the new hash. **The JS code-unit shape is deliberately not tolerated** — see below. |
@@ -230,6 +242,90 @@ so this is fleet precedent rather than a local shortcut. Confirmed with the prog
 than decided here; the profile split is queued as a CID-3 clarifying sentence in the next
 spec batch.
 
+## Provenance
+
+Every citation in this file is re-derivable. The commands, not the values, are the record:
+
+```
+# Spec v8 blob this file rows against
+git -C ../langsys2 ls-tree origin/feature/838_write_key_gating docs/sdk-spec.mdx
+#   -> b657b490f07615b889081c0ac5244ec4bd73bf81   (tip 483f98fb)
+
+# Rule count in that blob
+git -C ../langsys2 cat-file blob b657b490 | grep -cE '^### [A-Z]+-[0-9]+ '
+#   -> 79
+
+# Shared canonicalization fixture (19 cases), vendored at spec/fixtures/
+git -C ../langsys-js-typescript rev-parse 6596faf:tests/fixtures/canonicalization-reference.json
+#   -> e4c1f185974fbf2ebda6154f36b8ed7416f1d7fa
+git hash-object spec/fixtures/canonicalization-reference.json     # must match
+
+# Shared custom_id fixture (13 rows), vendored at spec/fixtures/
+git -C ../langsys-php-sdk rev-parse 8862841:tests/fixtures/custom-id-reference.json
+#   -> 60dc9b33ecfd5fa3256fca7d36063ceb8ef1a00a
+git hash-object spec/fixtures/custom-id-reference.json            # must match
+
+# TOK-3's twenty-seven, order included, against the PHP source
+sed -n '26,60p' ../langsys-php-sdk/src/Html/HtmlParser.php | grep -oE "'[a-z-]+'" | tr -d "'"
+```
+
+Both fixture blobs are asserted by the suite, so a vendored copy that drifts fails the
+build rather than the reader.
+
+## On TOK-1, and why the previous pass was accidental
+
+`<script>` and `<style>` produced no tokens before this lane, and the fixture rows for both
+said *agree*. That was not an exclusion. Nokogiri models their children as `CDATA` nodes,
+the walker tested `child.text?`, and `text?` is false for CDATA — so the two elements were
+skipped by a property of libxml2's node modelling, with no exclusion list anywhere in the
+content-block path. Swap the parser, or hand it a document where those children parse as
+text, and both start leaking with nothing in the code having changed.
+
+`<noscript>` is the same path without the accident: libxml2 parses its children as elements,
+so `Enable JavaScript` was tokenized and registered. That is the divergence the fixture row
+records, and it is the one that proves the pass on the other two was luck.
+
+The exclusion is now by element name, and the test asserts the predicate directly rather
+than only the outcome.
+
+**Two rows in this file were wrong before this lane, and both are corrected above rather
+than quietly re-graded.** `script` and `style` were passing TOK-1's intent by accident of
+libxml2's CDATA modelling, with no exclusion anywhere in the content-block path — a pass
+that would have vanished the moment the parser changed. And the tokenizer's whitespace
+class was `\s`, which is ASCII-only in Ruby, so every `U+00A0` and `U+2028`/`U+2029` in
+customer content minted an id no other SDK could reproduce. Four of the nineteen shared
+fixture rows measured as divergent on first run; all four matched `langsys-php` exactly,
+which is what the fixture's per-lane columns are for.
+
+## Measured, not changed: `svg`, `math`, and the two paths
+
+TOK-1 does not name `<svg>` or `<math>`. This SDK has two tokenizing paths and they
+disagree about them:
+
+| element | content-block path (feeds `registration.rb`) | page path (`translate_page`) |
+|---|---|---|
+| `script` | clean (now by exclusion, previously by CDATA accident) | clean |
+| `style` | clean (now by exclusion, previously by CDATA accident) | clean |
+| `noscript` | **leaked** before this lane; now clean | clean |
+| `template` | **leaked** before this lane; now clean | clean |
+| `svg` | **leaks** `Label` from `<svg><text>Label</text></svg>` | clean |
+| `math` | **leaks** `Label` from `<math><mi>Label</mi></math>` | clean |
+
+`Page::SKIP_ELEMENTS` drops `svg` and `math`; the block path does not. The four TOK-1 names
+are now aligned across both. **`svg` and `math` are left as they are, deliberately** — no
+rule names them, aligning the paths would change ids for any block containing inline SVG
+text, and which way to align is a fleet decision rather than this lane's. Reported rather
+than settled.
+
+## Measured, not adopted: the `U+FEFF` delta
+
+`[[:space:]]` is Unicode-aware in Ruby and covers `U+00A0`, `U+2028`, `U+2029` and `U+3000`.
+JavaScript's `\s` covers all of those **and** `U+FEFF`, which `[[:space:]]` does not.
+
+No rule names `U+FEFF` and no fixture row exercises it, so adopting it here would be one
+lane inventing a contract detail binding four SDKs. Measured and reported instead. Neither
+class matches `U+200B`, so the two agree there.
+
 ## On GATE-8 and the two meanings of absence
 
 `write_enabled` can be absent for two different reasons: a pre-capability server omitted
@@ -254,13 +350,13 @@ worth reading is one that cannot.
 
 | Status | Count |
 |---|---|
-| implemented | 35 |
+| implemented | 45 |
 | provisional | 2 |
 | partial | 1 |
 | not implemented | 2 |
-| n/a — profile | 26 |
+| n/a — profile | 28 |
 | n/a — architecture | 1 |
-| **total** | **67** |
+| **total** | **79** |
 
 `provisional` is CAT-1 and CAT-2 — implemented, but resting on mocked transport only, which
 CONF-2 does not count as proof. `not implemented` is GATE-7 (no coverage-property test that
