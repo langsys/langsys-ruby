@@ -88,7 +88,7 @@ RSpec.describe "CID conformance" do
     it "emits U+2028 raw rather than escaped" do
       # script_safe: true would escape this and silently break byte-identity. It is the
       # single option that breaks CID-1 in Ruby, and nothing else in the suite would notice.
-      expect(Langsys.canonical_block_json("UI", ["a b"]).bytes.map { |b| format("%02x", b) }.join)
+      expect(Langsys.canonical_block_json("UI", ["a\u2028b"]).bytes.map { |b| format("%02x", b) }.join)
         .to include("e280a8")
     end
 

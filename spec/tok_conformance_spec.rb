@@ -102,12 +102,12 @@ RSpec.describe "TOK conformance" do
       # A token COUNT divergence, not a value one: a block's id derives from its phrases
       # in order, so this moves the id of every block containing such a node — including
       # blocks whose visible text is identical.
-      expect(Langsys::Html.extract_phrases("<p> </p>")).to be_empty
+      expect(Langsys::Html.extract_phrases("<p>\u00A0</p>")).to be_empty
     end
 
     it "produces NO token for U+2028 / U+2029-only nodes either" do
-      expect(Langsys::Html.extract_phrases("<p> </p>")).to be_empty
-      expect(Langsys::Html.extract_phrases("<p> </p>")).to be_empty
+      expect(Langsys::Html.extract_phrases("<p>\u2028</p>")).to be_empty
+      expect(Langsys::Html.extract_phrases("<p>\u2029</p>")).to be_empty
     end
 
     it "preserves a U+00A0 lead/trail as a space when re-emitting a translation" do
@@ -176,7 +176,7 @@ RSpec.describe "TOK conformance" do
     end
 
     it "collapses U+00A0 inside an attribute value too" do
-      expect(Langsys::Html.extract_phrases("<img alt=\"A long   description\">"))
+      expect(Langsys::Html.extract_phrases("<img alt=\"A\u00A0long\u0020\u0020\u0020description\">"))
         .to eq(["A long description"])
     end
   end

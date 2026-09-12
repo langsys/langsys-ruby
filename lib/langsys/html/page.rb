@@ -189,7 +189,10 @@ module Langsys
       end
 
       def handle_block(element, item_cat)
-        inner = Html.inner_html(element)
+        # Same excision as the leaf path (MARK-2): a declared content-block host does not
+        # own a child another SDK has already identified. Without this the two paths met
+        # the rule differently, and the rule was satisfied on whichever one a test used.
+        inner = Html.inner_html(Page.without_marked_hosts(element))
         phrases = Html.extract_phrases(inner, @attrs)
         return if phrases.empty?
 

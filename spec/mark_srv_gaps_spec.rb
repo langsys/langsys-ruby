@@ -19,7 +19,8 @@ RSpec.describe "canonicalization gaps" do
     it "collapses U+00A0 in a description meta exactly as in a text node" do
       client = rendering_client
       client.translate_page(
-        "<html><head><meta name=\"description\" content=\" Buy   now \"></head><body></body></html>"
+        "<html><head><meta name=\"description\" " \
+        "content=\"\u00A0Buy\u0020\u0020\u0020now\u00A0\"></head><body></body></html>"
       )
       expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Buy now"])
     end
@@ -27,7 +28,7 @@ RSpec.describe "canonicalization gaps" do
     it "collapses U+2028 in an og:title meta" do
       client = rendering_client
       client.translate_page(
-        "<html><head><meta property=\"og:title\" content=\"Buy now\"></head><body></body></html>"
+        "<html><head><meta property=\"og:title\" content=\"Buy\u2028now\"></head><body></body></html>"
       )
       expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Buy now"])
     end
@@ -35,7 +36,7 @@ RSpec.describe "canonicalization gaps" do
     it "gives a meta and a text node carrying the same authored string one id" do
       client = rendering_client
       client.translate_page(
-        "<html><head><meta name=\"description\" content=\"Buy now\"></head>" \
+        "<html><head><meta name=\"description\" content=\"Buy\u00A0now\"></head>" \
         "<body><p>Buy now</p></body></html>"
       )
       expect(client.pending_phrases.map { |p| p["phrase"] }.uniq).to eq(["Buy now"])
@@ -44,7 +45,7 @@ RSpec.describe "canonicalization gaps" do
     it "emits no phrase for a whitespace-only meta content" do
       client = rendering_client
       client.translate_page(
-        "<html><head><meta name=\"description\" content=\" \"></head><body></body></html>"
+        "<html><head><meta name=\"description\" content=\"\u00A0\"></head><body></body></html>"
       )
       expect(client.pending_phrases).to be_empty
     end
@@ -70,6 +71,32 @@ RSpec.describe "canonicalization gaps" do
         client.translate_page("<html><body><div><p #{attr}=\"Welcome\">Welcome</p></div></body></html>")
         expect(client.pending_phrases.map { |p| p["phrase"] }).not_to include("Welcome")
       end
+
+      it "excises a #{attr} host from an EXPLICIT content-block host too" do
+        # The leaf path (walk_block) excised marked hosts; the explicit-host path
+        # (handle_block, reached via data-*-contentblock) handed the raw inner HTML
+        # straight to the tokenizer. So a marked span inside a declared block still had
+        # its text folded into that block's id — a second registration for content that
+        # already has one, which is exactly what MARK-2 forbids. Two paths, one rule; the
+        # rule was met on whichever path happened to be tested.
+        client = rendering_client
+        client.translate_page(
+          "<html><body><div data-langsys-contentblock=\"1\">" \
+          "<span #{attr}=\"Welcome\">Welcome</span> <em>friend</em></div></body></html>"
+        )
+        queued = client.pending_content_blocks.flat_map { |b| b["phrases"] }
+        expect(queued).to eq(["friend"])
+        expect(queued).not_to include("Welcome")
+      end
+    end
+
+    it "still splits an unmarked explicit content-block host (control)" do
+      client = rendering_client
+      client.translate_page(
+        '<html><body><div data-langsys-contentblock="1">' \
+        "<span>Welcome</span> <em>friend</em></div></body></html>"
+      )
+      expect(client.pending_content_blocks.flat_map { |b| b["phrases"] }).to eq(%w[Welcome friend])
     end
 
     it "still splits an unmarked block (control)" do
