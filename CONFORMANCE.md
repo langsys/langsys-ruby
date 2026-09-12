@@ -5,7 +5,7 @@
 | **SDK** | `langsys-ruby` (Ruby base SDK) |
 | **Profiles** | `all`, `server` |
 | **specVersion** | 8 |
-| **Spec revision read** | git `origin/feature/838_write_key_gating` `483f98fb9c22155fdd51e0946239556470f57936`, blob `docs/sdk-spec.mdx` `b657b490f07615b889081c0ac5244ec4bd73bf81`, read 2026-09-11. Re-derive with `git -C ../langsys2 ls-tree origin/feature/838_write_key_gating docs/sdk-spec.mdx`. Docs-site publication pending, so this rows against the blob. |
+| **Spec revision read** | git `origin/feature/838_write_key_gating`, blob `docs/sdk-spec.mdx` **`042dedb5b533499a277b88fc9e2ee39ef30a0b89`**, specVersion 8, 79 rules. Work was done against blob `b657b490f07615b889081c0ac5244ec4bd73bf81` (read 2026-09-11); the branch moved to `042dedb5` while this lane ran. **Verified before re-citing:** same 79 rule ids, and every rule this file grades is byte-identical across the two — only surrounding prose moved, which is the document-revision-moves-but-no-rule-does case the appendix describes. Re-derive with `git -C ../langsys2 ls-tree origin/feature/838_write_key_gating docs/sdk-spec.mdx`. Docs-site publication pending, so this rows against the blob. |
 | **SDK revision** | `feature/838_write_key_gating`, cut from `main` `27a2381` (the repo's only prior commit) |
 | **Suite** | 300 unit examples in 15 test files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
 | **Status** | Waves 1, 2 and the canonicalization lane delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
@@ -427,6 +427,24 @@ own.
    **Coverage depth**, E2E wave.
 4. **Request-boundary wiring** — `reset_write_decision!` and the REG-3 flush both need a host
    lifecycle hook. **Other repo**: `langsys-ruby-rails`, framework-variant wave.
+
+## Owed when spec 8.0.1 lands
+
+Agreed with the program, blocked on the new blob — Langsys sends it. Recorded here so the
+work is not rediscovered:
+
+- **Add `U+FEFF` to the collapse set.** Measured and reported during this lane as a live
+  JS-vs-`[[:space:]]` divergence, deliberately not adopted unilaterally; 8.0.1 settles it.
+- **Stop collapsing `U+0085` and `U+180E`.** `[[:space:]]` matches both and the converged
+  set does not, so this narrows the class rather than widening it — the one direction that
+  can change ids for content already registered.
+- **Page path stops skipping standalone `svg`.** The operator ruled SVG text translatable;
+  `math` joins the exclusions instead. This is the svg/math disagreement this file reports
+  as measured-not-changed, now decided — and it resolves the two paths in opposite
+  directions for the two elements, so both need doing together.
+- **SRV-4 flips to `n/a` structurally**, once the clarification confirming it is the
+  hydration hand-off lands. Held at `not implemented` until then, per its row.
+- **Re-row every claim against the new blob** and re-run the computed summary.
 
 ## Limitations of this document
 
