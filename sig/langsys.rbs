@@ -213,7 +213,11 @@ module Langsys
   module Html
     # TOK-2/TOK-4: Unicode-aware. Ruby's \s is ASCII-only and leaves U+00A0 and
     # U+2028/U+2029 in the token.
+    WHITESPACE_CODE_POINTS: Array[Integer]
     WHITESPACE: Regexp
+    PLACEHOLDER_ESCAPE: Regexp
+    PHRASE_MARKERS: Array[String]
+    CONTENT_BLOCK_MARKERS: Array[String]
     # TOK-1: excluded by element NAME, not by how the parser models the children.
     NON_TOKENIZED_ELEMENTS: Array[String]
     # TOK-3: twenty-seven, and the order is normative.
@@ -221,6 +225,11 @@ module Langsys
 
     def self.ensure_nokogiri!: () -> bool
     def self.normalize_whitespace: (String?) -> String
+    def self.canonical_token: (String?) -> String
+    def self.normalize_markup_placeholders: (String) -> String
+    def self.whitespace_char?: (String?) -> bool
+    def self.phrase_marked?: (untyped) -> bool
+    def self.classify_block_attribute: (untyped) -> (:absent | :declaration | :opt_out | :identity)
     def self.excluded_from_tokenizing?: (String | Symbol) -> bool
     def self.extract_phrases: (String?, ?Array[String]?) -> Array[String]
     def self.apply_block_translations: (String?, Hash[String, untyped], ?Array[String]?) -> String
@@ -239,7 +248,6 @@ module Langsys
       def self.translate: (untyped, String?, ?String?, ?Hash[String, untyped]?) -> String
       def self.marker_attr: (untyped, String) -> String?
       def self.content_block_marked?: (untyped) -> bool
-      def self.without_marked_hosts: (untyped) -> untyped
     end
   end
 

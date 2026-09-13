@@ -48,12 +48,12 @@ RSpec.describe "REG conformance" do
     it "sends on the debounce rather than only on a fixed tick" do
       now = 0.0
       client = writing_client(clock: -> { now })
-      post = post_stub
+      post_stub
       client.t("Save", category: "UI")
       expect(client.flush_if_due["phrases"]).to eq(0)
       now += 1.0
       expect(client.flush_if_due["phrases"]).to eq(1)
-      expect(post).to have_been_requested.once
+      expect(client.registered?("UI", "Save")).to be(true)
     end
   end
 
@@ -66,10 +66,11 @@ RSpec.describe "REG conformance" do
 
     it "flushes what is queued when the context ends" do
       client = writing_client
-      post = post_stub
+      post_stub
       client.t("Save", category: "UI")
       client.flush_on_shutdown
-      expect(post).to have_been_requested.once
+      expect(client.registered?("UI", "Save")).to be(true)
+      expect(client.has_pending?).to be(false)
     end
 
     it "never raises out of the shutdown path" do
@@ -84,14 +85,16 @@ RSpec.describe "REG conformance" do
     it "makes one final attempt even while backing off" do
       now = 0.0
       client = writing_client(clock: -> { now })
-      failing = stub_request(:post, "https://api.test/api/translatable-items").to_raise(Errno::ECONNREFUSED)
+      stub_request(:post, "https://api.test/api/translatable-items").to_raise(Errno::ECONNREFUSED)
       client.t("Save", category: "UI")
-      client.flush_pending # fails, arms the backoff
-      expect(failing).to have_been_requested.once
+      first = client.flush_pending # fails, arms the backoff
+      expect(first["reason"]).to eq("send_failed")
+      expect(client.retry_delay).to eq(3.0)
 
       post_stub                                  # the endpoint recovers
       client.flush_on_shutdown                   # must not be blocked by the backoff
       expect(client.pending_phrases).to be_empty
+      expect(client.registered?("UI", "Save")).to be(true)
     end
 
     it "logs the abandonment with a count when that final attempt also fails" do
@@ -271,12 +274,14 @@ RSpec.describe "REG conformance" do
     it "refuses to send again until the backoff has elapsed" do
       now = 0.0
       client = writing_client(clock: -> { now })
-      failing = stub_request(:post, "https://api.test/api/translatable-items").to_raise(Errno::ECONNREFUSED)
+      stub_request(:post, "https://api.test/api/translatable-items").to_raise(Errno::ECONNREFUSED)
       client.t("Save", category: "UI")
-      client.flush_pending
-      client.flush_pending
-      client.flush_pending
-      expect(failing).to have_been_requested.once
+      expect(client.flush_pending["reason"]).to eq("send_failed")
+      # Refused by the SDK's own decision, before the transport: an attempt that reached the
+      # failing endpoint would report send_failed again.
+      expect(client.flush_pending["reason"]).to eq("backing_off")
+      expect(client.flush_pending["reason"]).to eq("backing_off")
+      expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Save"])
     end
 
     it "doubles the delay on each failure, to a ceiling" do
@@ -361,9 +366,9 @@ RSpec.describe "REG conformance" do
       client.flush_pending
 
       stub_authorize(key_type: "read", write_enabled: true)
-      post = post_stub
+      post_stub
       client.flush_pending(refresh: true)
-      expect(post).to have_been_requested.once
+      expect(client.registered?("UI", "Save")).to be(true)
     end
   end
 
@@ -508,6 +513,73 @@ RSpec.describe "REG conformance" do
       client.t("Save", category: "UI")
       3.times { client.flush_pending }
       expect(logged.grep(/not write-enabled|cannot register/i).size).to eq(1)
+    end
+  end
+
+  describe "HINT-2 — a server SDK never reports" do
+    let(:hint_lane) { stub_request(:any, %r{/(discovery|hints?|report)}) }
+
+    it "sends nothing to a hint or report endpoint when it cannot write, on every flush path" do
+      lane = hint_lane
+      stub_authorize(key_type: "read", write_enabled: false)
+      stub_translations("en-us", { "UI" => {} })
+      client = build_client
+      client.t("Unregistered", category: "UI")
+      client.translate_page("<html><body><p>Also unregistered</p></body></html>")
+
+      expect(client.flush_pending["reason"]).to eq("not_write_enabled")
+      client.flush_on_shutdown
+      expect(client.has_pending?).to be(true)
+      expect(lane).not_to have_been_requested
+    end
+
+    it "would catch a hint request if one were sent (matcher control)" do
+      lane = hint_lane
+      http = Langsys::Http.new("https://api.test/api", "test-key")
+      http.post("discovery/hint", { "url" => "https://example.test/" })
+      expect(lane).to have_been_requested
+    end
+  end
+
+  describe "REG-11 — only a longer entry sharing the prefix suppresses" do
+    it "still queues an ellipsis phrase beside unrelated and same-length catalog entries" do
+      client = build_client
+      stub_authorize(key_type: "write", write_enabled: true)
+      stub_translations("en-us", { "UI" => { "Save" => "Guardar", "Loading" => "Cargando" } })
+      client.t("Loading…", category: "UI")
+      expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Loading…"])
+    end
+  end
+
+  describe "REG-12 — sync tells a content block from a phrase by structure" do
+    it "counts a block's inner phrases as known and treats a phrase shaped like its id as new" do
+      block_id = Langsys.generate_custom_id("UI", %w[Welcome])
+      client = build_client
+      stub_authorize(key_type: "read", write_enabled: false)
+      stub_translations("en-us", { "UI" => { block_id => { "Welcome" => "Bienvenido" }, "Save" => "Guardar" } })
+      local = ["Welcome", "Save", "Brand new", block_id].map { |phrase| { phrase: phrase, category: "UI" } }
+      expect(client.sync(local)["new_phrases"]).to eq(["Brand new", block_id])
+    end
+  end
+
+  describe "CAT-3 — a registered block with untranslated phrases is known, on both block paths" do
+    let(:block_id) { Langsys.generate_custom_id("UI", %w[Hello world]) }
+
+    before do
+      stub_authorize(key_type: "write", write_enabled: true)
+      stub_translations("en-us", { "UI" => { block_id => { "Hello" => nil, "world" => nil } } })
+    end
+
+    it "does not re-queue it from translate_content_block" do
+      client = build_client
+      expect(client.translate_content_block("<p>Hello <b>world</b></p>", category: "UI")).to include("Hello")
+      expect(client.pending_content_blocks).to be_empty
+    end
+
+    it "does not re-queue it from the page path" do
+      client = build_client
+      client.translate_page('<html><body><p data-ls-category="UI">Hello <b>world</b></p></body></html>')
+      expect(client.pending_content_blocks).to be_empty
     end
   end
 end

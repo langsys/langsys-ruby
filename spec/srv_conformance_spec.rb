@@ -165,23 +165,25 @@ RSpec.describe "SRV conformance" do
   end
 
   describe "SRV-3 — collect misses after the response, never from a read-only key" do
-    it "issues no registration request during the render itself" do
+    it "registers nothing during the render, only after the response" do
       # The ORDER is the assertion. A test that only checks a miss was eventually
       # collected passes against an implementation that collects it inline and hands the
       # visitor the latency.
       client = build_client
       stub_authorize(key_type: "write", write_enabled: true)
       stub_translations("it-it", { "UI" => {} })
-      post = stub_request(:post, "https://api.test/api/translatable-items")
-             .to_return(status: 200, body: JSON.generate({ "status" => true }),
-                        headers: { "Content-Type" => "application/json" })
+      stub_request(:post, "https://api.test/api/translatable-items")
+        .to_return(status: 200, body: JSON.generate({ "status" => true }),
+                   headers: { "Content-Type" => "application/json" })
       client.set_locale("it-IT")
       client.translate_page('<html><body><p data-langsys-category="UI">Pricing</p></body></html>')
 
-      expect(post).not_to have_been_requested       # nothing on the request path
-      expect(client.has_pending?).to be(true)       # but the miss WAS recorded
-      client.flush_pending                          # ...and leaves after the response
-      expect(post).to have_been_requested
+      # Nothing is accepted on the request path: the miss is recorded, not registered...
+      expect(client.registered?("UI", "Pricing")).to be(false)
+      expect(client.has_pending?).to be(true)
+      client.flush_pending
+      # ...and it is accepted only after the response.
+      expect(client.registered?("UI", "Pricing")).to be(true)
     end
 
     it "pushes nothing from a read-only key" do
@@ -203,13 +205,35 @@ RSpec.describe "SRV conformance" do
       client = build_client
       stub_authorize(key_type: "write", write_enabled: true)
       stub_translations("it-it", { "UI" => {} })
-      post = stub_request(:post, "https://api.test/api/translatable-items")
-             .to_return(status: 200, body: JSON.generate({ "status" => true }),
-                        headers: { "Content-Type" => "application/json" })
+      stub_request(:post, "https://api.test/api/translatable-items")
+        .to_return(status: 200, body: JSON.generate({ "status" => true }),
+                   headers: { "Content-Type" => "application/json" })
       client.set_locale("it-IT")
       client.translate_page('<html><body><p data-langsys-category="UI">Pricing</p></body></html>')
       client.flush_pending
-      expect(post).to have_been_requested
+      expect(client.registered?("UI", "Pricing")).to be(true)
+    end
+  end
+
+  describe "SRV-5 — one registration per miss, counted from what was posted" do
+    it "posts a repeated token from a depth-3 nested block exactly once" do
+      stub_authorize(key_type: "write", write_enabled: true)
+      stub_translations("es-es", {})
+      posted = []
+      stub_request(:post, "https://api.test/api/translatable-items").to_return do |request|
+        posted.concat(JSON.parse(request.body)["translatable_items"])
+        { status: 200, body: JSON.generate({ "status" => true }), headers: { "Content-Type" => "application/json" } }
+      end
+      client = build_client
+      client.set_locale("es-ES")
+      client.translate_page("<html><body><div><section><article><p>Repeat</p><p>Miss <b>bold</b> Miss</p>" \
+                            "<p>Repeat</p></article></section></div></body></html>")
+      expect(client.flush_pending["success"]).to be(true)
+
+      blocks, phrases = posted.partition { |item| item["type"] == "content_block" }
+      # Counted, not compared as sets: the duplicates a re-entrant capture produces are identical.
+      expect(phrases.map { |item| item["phrase"] }.tally).to eq({ "Repeat" => 1 })
+      expect(blocks.map { |item| item["phrases"].map { |p| p["phrase"] } }).to eq([%w[Miss bold Miss]])
     end
   end
 end

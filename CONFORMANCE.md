@@ -3,453 +3,273 @@
 | | |
 |---|---|
 | **SDK** | `langsys-ruby` (Ruby base SDK) |
-| **Profiles** | `all`, `server` |
-| **specVersion** | 8 |
-| **Spec revision read** | git `origin/feature/838_write_key_gating`, blob `docs/sdk-spec.mdx` **`042dedb5b533499a277b88fc9e2ee39ef30a0b89`**, specVersion 8, 79 rules. Work was done against blob `b657b490f07615b889081c0ac5244ec4bd73bf81` (read 2026-09-11); the branch moved to `042dedb5` while this lane ran. **Verified before re-citing:** same 79 rule ids, and every rule this file grades is byte-identical across the two — only surrounding prose moved, which is the document-revision-moves-but-no-rule-does case the appendix describes. Re-derive with `git -C ../langsys2 ls-tree origin/feature/838_write_key_gating docs/sdk-spec.mdx`. Docs-site publication pending, so this rows against the blob. |
-| **SDK revision** | `feature/838_write_key_gating`, cut from `main` `27a2381` (the repo's only prior commit) |
-| **Suite** | 300 unit examples in 15 test files + 9 live examples, `bundle exec rake spec` / `rake integration`, counted at the branch tip below. The live GATE/WIRE probes are committed, so every `live` grade is re-runnable (CONF-2). |
-| **Status** | Waves 1, 2 and the canonicalization lane delivered. Live evidence throughout is against the local 838 server at `langsys2.test` on the seeded Ruby fixture project. |
+| **Profiles** | all, server |
+| **specVersion** | 8.0.1 |
+| **Spec revision read** | langsys2 5cff03a17751e7dae9dcf1af52a9454d027c9006, docs/sdk-spec.mdx blob 5c5c0723f88fb8e6b13f58876c7adca8b6b35691 |
+| **SDK revision** | `feature/838_write_key_gating`; this file is committed with the change it describes, on top of `20962ea` |
+| **Suite** | 470 hermetic examples (`bundle exec rake spec`) and 9 live examples (`rake integration`, against the local 838 server at `langsys2.test` on the seeded Ruby fixture project) |
+| **Tally** | computed from the rules table by `rake conformance:check`, never typed: implemented, live 5; implemented, n/a (pure), cross-implementation fixture 5; implemented, n/a (pure), in-process 31; n/a (architecture) 2; n/a (profile) 26; partial 3; provisional 7 |
 
-> **Per-rule revisions are not recorded and the omission is deliberate.** The template requires a
-> revision per claimed rule. Those hashes live in the docs system
-> (`langsys://internal/docs/sdk-spec/revisions`, or a section footer on `/xsys`); this lane has
-> neither — no MCP resource for it, and `/xsys` is address-gated. Inventing 12-char hashes to fill
-> the column would be precisely the self-reported claim this file exists to prevent, so the column
-> is absent and the document-level revision above carries what it honestly can. **Blocking for
-> `implemented` rows at wave time** — a stale `n/a` row is the most perishable in the file and has
-> nothing in code to contradict it.
+The spec revision is re-derived every time this file is written (`git -C ../langsys2 ls-tree
+5cff03a1 docs/sdk-spec.mdx`), and the file is checked in the build by the same code
+`rake conformance:check` runs: header, profiles, all 79 rule ids exactly once, the status and
+tier vocabulary, and a named mutation on every row that claims runtime behaviour.
 
-## What surfaced while writing this
+**Tier, as graded here.** The tier describes the evidence for the property the rule governs.
+`live`, `contract` and `mock` apply only where that property depends on what the API answers:
+acceptance, refusal, state across calls. In-process behaviour, cross-implementation identity
+fixtures, artifact inspection with a positive control, isolation and scoping, and the meta-rules
+CONF-2 and CONF-3 are `n/a (pure)`. A `provisional` row says "waits on: CONF-2 shared contract
+fixture" only where that fixture would change the evidence.
 
-Four things, none of which were on the list beforehand, and all four came from executing code
-rather than reading it.
+## What surfaced in the 8.0.1 re-row
 
-**The write-gating hazard is currently inert, and fixing GATE-1 alone arms it.** `write_enabled`
-is already written to cache — the authorize payload is stored verbatim at `client.rb:74` with a
-3600s TTL and a `Cache::File` backend that is process-external by default. Nothing reads the
-field today, so the fleet-wide hazard GATE-3 describes is real but dormant. The moment GATE-1
-is implemented without GATE-4, one allow-listed request write-enables every anonymous visitor on
-that host for an hour. **These are one change, not two.** No partial landing of the GATE family
-is safe, and that is not a sequencing preference — it is the difference between a dormant defect
-and a live one.
+All of it came from executing code; none of it from reading it.
 
-**The SDK emits a historical `custom_id` form.** `generate_custom_id` is
-`md5(tokens.join("|"))` — the PHP pipe-join legacy variant, which CID-3 permits accepting on
-lookup and prohibits emitting. Scored against the vendored fixture: **shipping 0/13, canonical
-CID-1 13/13**. The 0/13 carries a positive control — the same harness scores 13/13 for the
-candidate, so it is a real red rather than a broken runner.
+- **ICU recovery never ran on `t()` when the caller passed no params.** `Client#interpolate`
+  returned early on nil or `{}`, so a translation carrying a `select` or `plural` served its raw
+  ICU source to the visitor, and the ICU-4 notice could not fire. That is the spec's own
+  motivating case ("Welcome" asks for nothing; its translation selects). Every ICU test called
+  `Interpolate.call` directly, so none could see it. Found by the Rails lane building BIND-1
+  vectors; fixed red-first, with omitted params and `params: {}` pinned separately.
+- **Coverage that could not fail.** Four mutations reddened nothing on the first run, and choosing
+  mutations exposed rows with no test able to fail. Each is now a committed test:
+  - CID-4's decline vector shared no phrase with the block, so attaching the collision changed
+    nothing it could see;
+  - REG-11's positive control ran against an empty catalog, so "suppress on any other key"
+    passed it;
+  - `sync` had no test at all, so REG-12's structural check there could go;
+  - CAT-3 was cited through REG-12 examples that never build a registered block with null
+    phrases;
+  - CACHE-1's evidence covered the locale half of the key and not the project half.
+- **HINT-2 rested on a grep of `lib/`.** It is now a test on a key that cannot write, across both
+  flush paths, with a matcher control.
+- **The extract and apply paths disagreed.** Apply rewrote a phrase-marked host the tokenizer had
+  refused to tokenize; CONF-1 names extract-versus-apply explicitly. Apply now skips exactly
+  what extract skips, and a nested content-block host carrying another SDK's id is excised on
+  both.
+- **SRV-5's once-per-subtree property is held twice**: the walker captures each leaf once, and
+  stamped hosts are excised on any re-walk, while the queue coalesces identical items. A
+  mutation that defeats only one layer reddens nothing, so the recorded mutation defeats both.
+- **SRV-3 does not hold across overlapping requests** (measured by the Rails lane). See its row;
+  the fix adds public request-scope calls to the core and is held for the operator's ruling.
+- **A failing catalog fetch repeats on every lookup.** There is no negative cache and no backoff on
+  the read side: 5 GETs for 5 `t()` calls and 11 for an 11-token page, hermetic (404, 500, refused)
+  and live (`zz-zz`, `ValidationError`). Measured at Reviewer's request and reported with a row
+  recommendation (WIRE-4); not fixed in this re-row.
 
-**CID-1 byte-correctness in Ruby depends on an option nobody will think to look for.** Stock
-`JSON.generate` is already byte-identical to the required three-flag form: it escapes neither
-`/` nor non-ASCII, and emits `U+2028`/`U+2029` raw. Ruby's equivalent of PHP's three flags is
-*setting nothing*. But `JSON.generate(…, script_safe: true)` escapes `U+2028` and silently breaks
-byte-identity — verified as a positive control, it produced `["UI",["a b"]]`. That flag is
-the kind of thing added later for an unrelated XSS reason, by someone who would never look at
-this file. **A conformance test asserting only the hash would keep passing across that change**,
-which is why the `serialized_hex` column matters more for this lane than the `custom_id` column
-does.
+## Corrections to earlier grades
 
-**WIRE-4 is worse here than the PHP baseline the spec cites.** With the API pointed at a dead
-port, **all three** entry points throw — `translate`, `translate_content_block` *and*
-`translate_page`. PHP at least degrades correctly on `translatePage()`. On the server profile
-this is an availability coupling: a transient DNS failure returns a 500 to every visitor on any
-path calling `t()`. It was found by accident during environment setup, before the rule was read —
-which is its own evidence of how little it takes to trigger.
-
-## What surfaced during the wave itself
-
-**The GATE atomicity risk is real in the code, not just on paper.** The two halves are
-one commit here, and the reason is checkable rather than historical: remove the
-`except("write_enabled")` from the authorize cache write and `gate_conformance`'s
-GATE-3/4 block goes red, including the example where a second client on a shared warm
-cache inherits the first's decision. That is the file-cache leak, reproduced in seconds.
-
-**One ordering bug the tests caught and code review would not have.** The first
-`write_enabled?` read the decision slot *before* `authorize` had populated it, so a live
-`write_enabled: false` was ignored and the GATE-8 fallback answered `true` from `key_type`
-— a closed gate reported as open, which is the exact direction GATE-8 exists to prevent.
-Two tests failed (`flag wins over key_type`, and the read-key mirror). Nothing about the
-code read wrong; only the execution order was.
-
-**WIRE-3 broke ten existing tests, and that was the finding.** Every one of them stubbed
-the catalog endpoint at `es-ES`/`en-US`. They passed for the same reason the live probe in
-the spec's own history passed — they were measuring the SDK against itself. The failures
-were the change working.
-
-**A near-vacuous guard hid a live availability hole for two waves.** `Http#perform`
-rescued an enumerated list of socket errors, so `OpenSSL::SSL::SSLError` and
-`Net::HTTPBadResponse` — both direct `StandardError` subclasses, under neither
-`SystemCallError` nor `Net::ProtocolError` — escaped unwrapped, past every downstream guard,
-which all rescue `Langsys::Error` only. A cert rotation or an interfering proxy would have
-turned every `t()` page into a 500: the precise availability coupling WIRE-4 exists to
-prevent, while this file claimed WIRE-4 implemented.
-
-The rescue list is the defect; the test is why it survived. My WIRE-4 guard stubbed the
-**POST** to raise — and `t()` never POSTs. It could not have failed however wide the hole
-was. The rewritten guards aim protocol-layer failures at the **GET**, which is the request
-every entry point actually makes. The fix is `rescue StandardError` scoped to the single
-line `http.request(request)`, where "any exception here" and "the transport failed" are the
-same statement; the class name is kept in the message so degrading does not cost the
-diagnosis.
-
-**The summary table was a hand-maintained tally that reconciled with nothing.** It
-miscounted, listed rules as implemented that its own table graded `n/a` and `not
-implemented`, and had no bucket for two statuses the table used. It is now computed from
-the table and enforced by `spec/conformance_doc_spec.rb`, so the document fails the build
-rather than the reader.
-
-## On the vendored fixture
-
-`tests/fixtures/custom-id-reference.json` will be copied from langsys-php at **`8862841`**
-("Pin the canonical serialization at three flags; lock U+2028 with a fixture row"). Verified
-byte-identical (sha256 `28c03f42ffa6…`) to that repo's working copy at read time. Vendored
-rather than fetched, per fleet norm: a fixture change should arrive as a reviewable diff, and
-fetch-fail-closed would couple 13 repos' CI to cross-repo availability.
-
-**Integrity is asserted codepoints-first, before any hash is compared.** Rebuilding every input
-from its declared `codepoints` and comparing to the shipped `category`/`tokens` passes on all 13
-rows. This ordering is load-bearing rather than tidy: a vendoring pipeline that normalized
-`U+2028` to a space would leave the hash comparison testing the pipeline instead of the SDK.
-The check has a real positive control — row 13 carries `U+2028`, and normalizing it does change
-the serialized bytes, so the check can fail in the direction it exists to catch.
-
-**The non-BMP requirement is met by the fixture as shipped; no extension needed.** Verified
-independently rather than taken on report: row 10 carries `U+1F600`, and 7 of 13 rows carry a
-codepoint above `U+00FF`.
-
-Serialization will be compared through the *same* function the implementation hashes — never a
-second expression written inside the assertion. The PHP lane found four sites re-deriving their
-serialization, one of them inside the assertion meant to check it; a parallel reimplementation
-agrees with itself and keeps agreeing after the real one moves.
+- **`implemented` with tier `mock` was never a valid grade under CONF-2**, and 30 rows carried
+  it from wave 1 until this re-row. Each is re-graded on the property: `n/a (pure)` where the
+  property is in-process, `provisional` where the contract fixture would change the evidence
+  (GATE-2, GATE-5, REG-8, REG-9, REG-10, WIRE-2).
+- **`contract` on CID-1, CID-2, TOK-1..TOK-4** was wrong: a shared identity fixture cannot say no.
+  Now `n/a (pure)`, with "cross-implementation fixture" in the evidence.
+- **CAT-1 and CAT-2** were `provisional, mock`; the property is an in-process classification.
+- **ICU-1, ICU-3, ICU-4** were graded `implemented` while broken on the `t()` path (above).
+- **HINT-2** was `implemented, live` on a grep; **GRANT-1..4** carried tier `live` on `n/a` rows.
+- **GATE-7** was `not implemented`, "Not assessed"; the property test is committed now.
+- **SRV-4** was held at `not implemented` pending the clarification 8.0.1 delivered.
+- **SRV-5** was `n/a (architecture)` for both halves; 8.0.1 makes the once-per-subtree half
+  measurable for a DOM-walking SDK.
+- **CONF-3** was `not implemented` pending a fleet harness; the ruling is that a named,
+  re-appliable mutation per runtime row discharges it, and the harness is a queued item.
+- **TOK-3 and TOK-4** were `implemented` on the block path alone; the every-path clause makes
+  the page path part of the rule, and it has a gap.
 
 ## Rules
 
-Evidence tiers per CONF-2: `live` (real server), `contract` (shared fixture), `mock` (stubbed
-transport), `none`. Per CONF-1, a row citing only what the SDK *sent* is not evidence.
-
-| Rule | Status | Evidence | Test / basis |
+| Rule | Status | Tier | Evidence |
 |---|---|---|---|
-| GATE-1 | **implemented** | live | `gate_conformance` GATE-1 block (6). Live: an `ip_write` key the server write-enables now registers and the server ACCEPTS it — it was refused before this branch. Flag wins in both directions; `key_type` is reported verbatim. Envelope-level flag on `/translations` read too. |
-| GATE-2 | **implemented** | mock | A session that is not write-enabled **retains** its queue — the previous behaviour discarded it, losing phrases because the decision was unavailable — and registers what was held once capability resolves true. |
-| GATE-3 | **implemented** | live | `gate_conformance` GATE-3/4 block. The decision is never read back out of the cache: a second client sharing a warmed cache resolves `false` when the server says `false`, even though the first resolved `true`. |
-| GATE-4 | **implemented** | live | Same block. Live cache keys after authorize no longer contain `write_enabled`; positive control asserts the rest of the payload is still cached. |
-| GATE-5 | **implemented** | mock | Markers are written only in `Discovery#confirm`, after the server accepted. Nothing is marked on a failed send or a skipped write. Markers are namespaced by project id, per the rule's operational corollary. |
-| GATE-6 | n/a (architecture) | none | Profiles: `all`, so it binds — but this SDK has no report lane at all (HINT-2), so registering and reporting cannot both fire and there is nothing to branch. Architecture, not profile: if a report lane were ever added here, this row becomes live with no rule having changed. |
-| GATE-7 | not implemented | none | Not assessed. |
-| GATE-8 | **implemented** | mock | `gate_conformance` GATE-8 block (4): plain `write` inferred on absence, `read` refused, **`ip_write` never inferred**, and the decision re-evaluated per response rather than latched. |
-| CAT-1 | provisional | mock | `spec/catalog_spec.rb` "marks an absent key as missing" / "falls back to the source phrase for present-but-empty/null (not missing)" — presence, not truthiness. |
-| CAT-2 | provisional | mock | `spec/client_spec.rb` "does not re-queue a present-but-null phrase". |
-| CAT-3 | **implemented** | mock | Covered by the REG-12 structural examples: a registered block resolves as an object rather than a null. |
-| REG-1 | **implemented** | live | `flush_pending` and `require_write!` both gate on `can_write?`, which is now the server's decision rather than `key_type`. `gate_conformance` proves the gate governs the POST in both directions; the live read-key arm proves refusal against the real server. |
-| REG-2 | **implemented** | mock | Sending is debounce-driven, not interval-driven: `flush_due?` reports ready once activity settles, `flush_if_due` is the automatic path, and the clock is injected so the timing rule has real tests rather than sleeps. A `MAX_WAIT_SECONDS` ceiling keeps a continuous trickle from starving the debounce — each new miss would otherwise push the window out forever. |
-| REG-3 | **implemented** | mock | `flush_pending` is the public manual flush; `flush_on_shutdown` never raises, **bypasses the backoff for one final attempt**, and logs an abandonment with the item count if that fails. A backed-off queue was previously dropped at shutdown with no request and no log — permanent loss, unrecorded. See the declared wrapper obligation below. |
-| REG-4 | n/a (profile: browser) | none | No page teardown exists. |
-| REG-5 | n/a (profile: browser) | none | No page teardown exists. |
-| REG-6 | **implemented** | mock | `Discovery#snapshot` freezes what is sent; `#confirm` clears exactly those keys. A phrase queued from inside the in-flight request is still queued afterwards, with a positive control proving the ordinary path does clear. |
-| REG-7 | **implemented** | mock | `Discovery#begin_send` is a mutex-guarded flag; a re-entrant flush is refused with `reason: "in_flight"` and the first phrase is sent exactly once. Chose refuse-and-report over clear-after-await: the snapshot makes queued-during-flight items provably neither lost nor double-sent. |
-| REG-8 | **implemented** | mock | 3s → doubling → 300s ceiling, asserted across 12 failures; queue retained; reset on first success; no send attempted while backing off. Paired explicitly with WIRE-4 so the two guards are shown not to fight. |
-| REG-9 | **implemented** | mock | Phrases **and** content blocks are built into one item list before chunking, so a first render with many new blocks is one request rather than one POST per block. Asserted against a server-supplied limit of 2. |
-| REG-10 | **implemented** | mock | One behaviour on every path: never raises — including when `authorize` fails mid-flush (`decision_unavailable`, now committed) and including protocol-layer failures, which previously escaped `Http#perform` unwrapped — always logs, and never returns a success-shaped result for work that did not happen. |
-| REG-11 | **implemented** | mock | Warns on both `…` and `...` spellings and still registers, since "Loading…" is legitimate. Suppresses only on the second signal — a longer catalog entry sharing the prefix — with a positive control for the no-sibling case. |
-| REG-12 | **implemented** | mock | Structural: a nested map is a content block. Asserted that a phrase which merely *looks* like a 32-hex id still registers, which a shape test would have rejected. |
-| HINT-2 | **implemented** | live | No hint/report code exists anywhere in `lib/` — grep for `hint`/`discovery/hint` is empty, and the live suite never issues such a request. A server SDK that cannot report satisfies this by construction. |
-| HINT-1, 3–12 | n/a (profile: browser) | none | Browser-only report lane. |
-| ICU-1 | **implemented** | mock | `icu_conformance` ICU-1 block (3), incl. a malformed node with no `other` branch degrading rather than inventing one. |
-| ICU-2 | **implemented** | mock | `icu_conformance` ICU-2 block (3), incl. an explicit assertion that nil does not render as `0`. |
-| ICU-3 | **implemented** | mock | `icu_conformance` ICU-3 block (5): recursive recovery two levels down, `#` emitting `{argName}`, and a supplied argument still rendering inside a recovered branch. |
-| ICU-4 | **implemented** | mock | `icu_conformance` ICU-4 block (5): names every defaulted argument and the locale, fires for plural and select, silent without a logger, deduped on the **(template, locale) pair** matching PHP and JS, and notifies again for a different locale. |
-| ICU-5 | **implemented** | mock | The discriminating Polish guard (3): `few` at n=3, `many` at n=5, `one` at n=1, distinct branch text. Its power is **provable by mutation** — degrading the renderer to one/other turns these red — which is the falsifiable claim; plus 3 mixed-node examples proving recovery rewrites only the missing node. |
-| TOK-1 | **implemented** | contract | `tok_conformance` TOK-1 block. The spec's own test (one sentence in script/style/template/noscript plus once in ordinary markup → exactly one phrase) plus a per-element example. **`<template>` is a real vector here, unlike in the JS family**: parse5 hangs template content off a separate fragment so a walker emits nothing either way, but libxml2 puts it in the tree, so omitting it from the exclusion list would leak. Excluded by element NAME — see the note below on why the previous pass was accidental. |
-| TOK-2 | **implemented** | contract | **Four** token paths, not three: the collapse, the re-emit lead/trail detector, `<title>`, and `meta[content]` — the last found by review because it neither collapsed nor trimmed, so a grep for the wrong handling could not see it. All three vectors, written as escapes never literals: internal `U+00A0` collapsing to the same id as `U+0020`; leading **and** trailing, which a collapse-only fix leaves behind; and a whitespace-only node producing **no** token, which is the count case that moves block ids. Control: text that genuinely differs keeps two ids. Fixture rows `nbsp-in-text`, `attr-nbsp`, `line-separators`. |
-| TOK-3 | **implemented** | contract | Twenty-seven attributes, verified **literally** against `langsys-php-sdk src/Html/HtmlParser.php:26-60` and against the spec text — identical in content *and* order, diffed rather than eyeballed. Plus the spec's test: three listed attributes on one element produce three phrases in list order, two unlisted produce none. |
-| TOK-4 | **implemented** | contract | The same string as a text node and as a `title` yields one id, and `U+00A0` collapses inside an attribute value too. Fixture rows `attr-multiline`, `attr-nbsp`. |
-| TOK-5 | **implemented** | mock | `{name}` and `%name%` interpolate to the same output, including a template mixing both. An unrecognised form is left literal. **Deliberate narrowing:** `%name%` is substituted only when the argument is supplied — ordinary prose is full of percent signs and a greedy rule turns `50%off20%` into a slot — so an unmatched escape stays exactly as authored rather than being rewritten into a gap marker. |
-| MARK-1 | **implemented** | mock | **Both halves.** A rendered block host carries `data-ls-contentblock`, stamped whether or not the block resolved, since the identity is wanted most when it did not; asserted by **re-deriving** the id with the tokenizer rather than reading back what the renderer just wrote. A rendered single-phrase host carries `data-ls-phrase` naming the SOURCE phrase, not the rendered text — that half was missing when this row first claimed `implemented`, found by review. |
-| MARK-2 | **implemented** | mock | All three suffixes in both spellings, on **both** tokenizing paths — the leaf path and the explicit content-block host path, which handed raw inner HTML to the tokenizer and folded a marked child's text into the block id until review caught it. `category`, `contentblock` and **`phrase`** — the last is the one the rule's own Test names, and it was missing when this row first claimed `implemented` with "both directions tested", which was true only of the other two. A marked host is left whole: not re-split, and nothing queued for its text, with an unmarked control proving the recognition is not just "tokenize nothing". |
-| SRV-1 | **implemented** | mock | Asserted on the **served bytes**, not a post-hydration DOM. Control phrase absent from the catalog emits the base language and is reported as a miss, which is what separates this from rendering a catalog that happened to be complete. |
-| SRV-2 | **implemented** | mock | Evidence is `srv_conformance` **"keeps two renders interleaved MID-RENDER"**: a two-party barrier inside `walk_block` holds both threads until both are inside a render, so they are provably suspended mid-walk at once, and the barrier's meeting is itself asserted so a silent degradation to sequential renders fails rather than passes. Pinned by moving `@locale` to a class variable, which reds exactly that example. **The 30-iteration loop is a supporting row, not the evidence** — an earlier version of this cell cited it as the proof, and it was measured as never once switching threads inside a render; it now asserts all 30 results per thread rather than the survivor, and proves cross-client isolation between renders. A third example proves no process-global holds per-request state. |
-| SRV-3 | **implemented** | mock | Three assertions, per the rule: the registration POST does **not** occur during the render (order of events, not merely that collection happens), a read-only key pushes nothing, and a write key on the same render pushes — the positive control without which the read-only half passes against an SDK that never pushes at all. |
-| SRV-4 | **not implemented** | none | **Rowed against the rule body, not the brief.** The Profiles line names `server` FIRST — only the synchronous seed belongs to the browser core — so this does not fall away on profile, and my earlier `n/a (profile: browser)` claimed a pass for work that does not exist. Verified: nothing in `lib/` emits a catalog for a client to pick up (`grep -riE '__LANGSYS|window\.|hydrat|<script'` finds only a TOK-1 comment). `get_translations` is public so an integrator could serialise it, but this SDK neither does nor documents it. Matching langsys-php, which holds the same row at `not implemented` pending a normative clarification: the rule's author has confirmed it over-binds a page-translation server SDK, and `translate_page` emits terminal HTML that nothing hydrates. Held here until the rule is corrected, that being the more honest of the two while the published text reads as it does. |
-| SRV-5 | n/a (architecture) | none | **Also not for the profile reason** — the Profiles line names `server`, so this falls away on MECHANISM. SRV-5 governs component child capture: a re-entrant render registering 2^n copies of one miss, or a `Suspense` fallback keying a block on a loading spinner. This SDK walks a DOM once and has no component model, no re-entrant render and no lazy children, so neither failure has a site here. The mechanism is named so the claim is checkable rather than asserted — and unlike a profile row, it can rot under us if a component surface is ever added. |
-| CID-1 | **implemented** | contract | `cid_conformance` — 13/13 hash **and** 13/13 `serialized_hex` bytes, asserted through the same function the id is hashed from. Plus explicit slash / non-ASCII / raw-U+2028 / UTF-8-bytes / order-sensitivity cases. |
-| CID-2 | **implemented** | contract | Both halves: the function coalesces `nil` **and** the `__uncategorized__` sentinel to `''`, and a caller-level example proves the content-block path (which passes the sentinel) hashes as `''`. |
-| CID-3 | **implemented** | mock | Both pipe-join spellings resolve — the empty-category form **and** the `__uncategorized__` sentinel form, most-likely-first and deduped, mirroring PHP's `legacyCustomIds`. Canonical id preferred when both exist; only the canonical id is ever emitted; tolerance shipped in the same change as the new hash. **The JS code-unit shape is deliberately not tolerated** — see below. |
-| CID-4 | **implemented** | mock | A legacy hit whose phrases differ is declined; positive control proves the guard still attaches when they agree. Set comparison, which CID-4 permits where the catalog has already lost order. |
-| SSR-1..3 | n/a (profile: browser) | none | — |
-| BIND-1..6 | n/a (profile: binding) | none | This is a core SDK. Binding rules bind `langsys-ruby-rails`, a separate repo. |
-| GRANT-1..4 | n/a (profile: browser) | live | Governing assignment is the families table (spec line 81), not the four `Profiles: all` rule bodies — contradiction referred to the Langsys lane. Posture is **affirmative**: `wire_conformance` asserts no `X-Write-Grant` header on any request, case-insensitively, over the assembled header set, with a matcher control. |
-| CACHE-1 | **implemented** | mock | Catalog keys are namespaced by project and by the **normalised** locale, so `en-US` and `en-us` are one entry — asserted by a request-count example. |
-| OBS-1 | **implemented** | mock | An unusable capability is surfaced exactly once per process — asserted over three flushes — so a read-key deployment reports the problem without warning on every flush forever. |
-| WIRE-1 | **implemented** | live | `http.rb:47` sends `X-Authorization` with the raw key, no `Bearer`. Exercised by all 5 live examples. |
-| WIRE-2 | **implemented** | mock | A 204 with an empty body is treated as success and marks the item registered. |
-| WIRE-3 | **implemented** | live | Live wire now carries `locale=es-es` from a client set to `es-ES`; display casing still emits `lang="es-ES"`. Cache keys unified through `Locale.normalize_locale`. |
-| WIRE-4 | **implemented** | mock | All three entry points degrade instead of raising, log it, and record nothing; positive control proves the queue still fills when the catalog is available. **Now asserted at the protocol layer too** — `OpenSSL::SSL::SSLError`, `Net::HTTPBadResponse` and `EOFError` aimed at the GET, across all three entry points and `flush_pending`. The previous version of this row was false: it was backed by a test that stubbed the POST, and `t()` never POSTs. |
-| WIRE-5 | **implemented** | live | `api_url:` is injectable and `LANGSYS_API_URL` is honoured; the live suite runs entirely through it. |
-| CONF-1 | **partial** | live | The rules that carry risk (GATE-1/3/4, WIRE-3, CID-1) are asserted against the live server or the shared fixture. The older `client_spec`/`html_spec` request-body assertions remain — **known residue, routed to the program's E2E wave**, where live-assertion infrastructure is the focus. Deliberately not converted here. |
-| CONF-2 | **implemented** | — | Every row carries a graded tier, and rows resting on mocked transport say so rather than claiming `live`. |
-| CONF-3 | not implemented | none | Mutation proofs are run and reported every wave, but they are **not a committed, re-runnable suite**, so the counts rest on a session's word — the self-reported claim this file exists to prevent, one level up. Deliberately left open pending the fleet-shared mutation-manifest harness; a lane-local one would be the fourth reinvention. |
+| GATE-1 | implemented | live | Capability comes from the server's `write_enabled`, in both directions, from authorize and from the `/translations` envelope; `key_type` is reported verbatim. Live: `live_spec.rb` "registers on an ip_write key the server HAS write-enabled" (server accepts) and "refuses to register on a read key the server has not write-enabled". Unit: `gate_conformance_spec.rb` GATE-1 blocks. Mutation (re-appliable): M1 `lib/langsys/client.rb` `Client#write_enabled?`: live write_enabled signal ignored; key_type decides -> 5 red (`gate_conformance_spec.rb:24` "refuses a write-typed key the server has disabled — the flag wins over key_type", `gate_conformance_spec.rb:30` "allows a read-typed key the server has write-enabled — the flag wins in both directions", `gate_conformance_spec.rb:42` "reads the flag from the translations envelope, not only from authorize", +2 more). |
+| GATE-2 | provisional | mock | A session that is not write-enabled retains its queue and registers it once capability resolves true: `reg_conformance_spec.rb` "keeps the queue when the session is not write-enabled", "registers what was held once capability resolves true"; `client_spec.rb` "retains the queue on a read key rather than dropping it (GATE-2)". The held-then-accepted half is state across calls against a stub. Waits on: CONF-2 shared contract fixture. Mutation (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#flush_pending`: queue discarded when not write-enabled -> 4 red (`client_spec.rb:32` "retains the queue on a read key rather than dropping it (GATE-2)", `reg_conformance_spec.rb:352` "keeps the queue when the session is not write-enabled", `reg_conformance_spec.rb:361` "registers what was held once capability resolves true", +1 more). |
+| GATE-3 | implemented | n/a (pure) | Scoping: the decision lives on the client, is compared by recency across authorize and the catalog envelope, is dropped by `reset_write_decision!`, and is never read back from a cache: `gate_conformance_spec.rb` "does not let a latched catalog `true` outrank a fresh authorize `false`" and its mirror, "drops the decision at an explicit request boundary", "does not let a cached decision answer for a later session". Process-level posture declared below. Mutations (re-appliable): M1 `lib/langsys/client.rb` `Client#write_signal`: recency compare replaced by fixed catalog precedence -> 2 red (`gate_conformance_spec.rb:126` "does not let a latched catalog `true` outrank a fresh authorize `false`", `gate_conformance_spec.rb:142` "does not let a latched catalog `false` outrank a fresh authorize `true`"); M2 `lib/langsys/client.rb` `Client#reset_write_decision!`: request-boundary reset keeps the authorize decision -> 1 red (`gate_conformance_spec.rb:157` "drops the decision at an explicit request boundary"). |
+| GATE-4 | implemented | n/a (pure) | Artifact inspection with a positive control: the cached authorize payload carries no `write_enabled` ("does not write write_enabled into the cache") while the rest stays cached ("keeps caching the rest of the authorize payload (positive control)"); the catalog cache holds `data` only. Also observed live: `live_spec.rb` "keeps the write decision out of the cache (GATE-4)". Mutation (re-appliable): M1 `lib/langsys/client.rb` `Client#authorize`: write_enabled not stripped before the cache write -> 1 red (`gate_conformance_spec.rb:56` "does not write write_enabled into the cache"). |
+| GATE-5 | provisional | mock | Markers are written only in `Discovery#confirm` after acceptance, namespaced by project and by the snapshot's category: `reg_conformance_spec.rb` "does not mark an item registered when the send failed", "marks an item registered once the server accepted it (positive control)", "records a content block under its own category even if the queue is cleared mid-request". A refusal and a second read are what the fixture exists for. Waits on: CONF-2 shared contract fixture. Mutation (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#send_snapshot`: a failed send confirms the snapshot -> 6 red (`reg_conformance_spec.rb:376` "does not mark an item registered when the send failed", `reg_conformance_spec.rb:100` "logs the abandonment with a count when that final attempt also fails", `reg_conformance_spec.rb:259` "retains the queue when the send fails", +3 more). |
+| GATE-6 | n/a (architecture: no report lane exists here, so registering and reporting cannot both fire; becomes live if a report lane is ever added) | - | Profiles: all, so it binds by profile and falls away only on mechanism. HINT-2's test shows no report traffic on a key that cannot write. |
+| GATE-7 | implemented | n/a (pure) | In-process routing: `t()`, `translate_content_block` and both page-path shapes feed the one registration lane and nothing reaches a report or hint endpoint: `identity_paths_801_spec.rb` "routes t(), translate_content_block and both page-path shapes into the one registration lane". The stub answers acceptance only so the lane is observable through `registered?`. Mutation (re-appliable): M1 `lib/langsys/html/page.rb` `Page#apply_or_queue_block`: page-path blocks not fed to the registration lane -> 25 red (`identity_paths_801_spec.rb:166` "routes t(), translate_content_block and both page-path shapes into the one registration lane", `canonicalization_801_spec.rb:84` "excludes inline math on the page path", `canonicalization_801_spec.rb:94` "never lets an inline svg cost its block the block's own text, on the page path", +22 more). |
+| GATE-8 | implemented | n/a (pure) | The absent-field case is an in-process function of the response shape; no current server and no contract fixture emits it, so neither would change the evidence. Plain `write` inferred on absence, `read` refused, `ip_write` never inferred, re-evaluated per response: `gate_conformance_spec.rb` GATE-8 block. Mutations (re-appliable): M1 `lib/langsys/client.rb` `Client#write_enabled?`: ip_write inferred from key type when the field is absent -> 2 red (`gate_conformance_spec.rb:103` "NEVER infers a write decision for ip_write when the field is absent", `gate_conformance_spec.rb:75` "does not let a cached decision answer for a later session"); M2 `lib/langsys/client.rb` `Client#write_enabled?`: read key inferred writable when the field is absent -> 3 red (`gate_conformance_spec.rb:97` "refuses a read key when the field is absent", `client_spec.rb:32` "retains the queue on a read key rather than dropping it (GATE-2)", `client_spec.rb:64` "requires a write key"). |
+| CAT-1 | implemented | n/a (pure) | Presence, not truthiness, decides a miss: `catalog_spec.rb` "marks an absent key as missing", "falls back to the source phrase for present-but-empty/null (not missing)"; `client_spec.rb` "does not re-queue a present-but-null phrase". Mutation (re-appliable): M1 `lib/langsys/catalog.rb` `Catalog.resolve`: presence test replaced by truthiness -> 2 red (`catalog_spec.rb:20` "falls back to the source phrase for present-but-empty/null (not missing)", `client_spec.rb:23` "does not re-queue a present-but-null phrase"). |
+| CAT-2 | implemented | n/a (pure) | Display falls back to source text for null and empty while presence still decides registration: `catalog_spec.rb` "falls back to the source phrase for present-but-empty/null (not missing)". Mutation (re-appliable): M1 `lib/langsys/catalog.rb` `Catalog.resolve`: empty translation displayed instead of source fallback -> 1 red (`catalog_spec.rb:20` "falls back to the source phrase for present-but-empty/null (not missing)"). |
+| CAT-3 | implemented | n/a (pure) | A registered block whose inner phrases are null is known on both block paths: `reg_conformance_spec.rb` "does not re-queue it from translate_content_block", "does not re-queue it from the page path", and "treats a nested map as a content block, never a missing phrase". Mutation (re-appliable): M1 `lib/langsys/html/client_surface.rb` `ClientSurface#lookup_block`: a registered block whose inner phrases are all null treated as unknown -> 2 red (`reg_conformance_spec.rb:573` "does not re-queue it from translate_content_block", `reg_conformance_spec.rb:579` "does not re-queue it from the page path"). |
+| REG-1 | implemented | live | `flush_pending` and `require_write!` gate on the server's decision. Live: `live_spec.rb` "refuses to register on a read key the server has not write-enabled". Unit: "does not POST when the server says write_enabled is false". Mutation (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#flush_pending`: write gate bypassed -> 9 red (`reg_conformance_spec.rb:392` "does not mark an item registered on a skipped write", `reg_conformance_spec.rb:401` "never returns a success-shaped result for a skipped write", `client_spec.rb:32` "retains the queue on a read key rather than dropping it (GATE-2)", +6 more). |
+| REG-2 | implemented | n/a (pure) | Debounce with a max-wait ceiling on an injected clock: `reg_conformance_spec.rb` REG-2 blocks. Mutations (re-appliable): M1 `lib/langsys/discovery.rb` `Discovery#due?`: debounce removed: due as soon as queued -> 3 red (`reg_conformance_spec.rb:30` "reports the burst as due only once activity has settled", `reg_conformance_spec.rb:48` "sends on the debounce rather than only on a fixed tick", `reg_conformance_spec.rb:130` "still waits for the burst to settle when the max wait has not elapsed"); M2 `lib/langsys/discovery.rb` `Discovery#due?`: max-wait ceiling removed -> 1 red (`reg_conformance_spec.rb:118` "flushes once the max wait has elapsed even if activity never settles"). |
+| REG-3 | implemented | n/a (pure) | `flush_pending` is the public flush; `flush_on_shutdown` never raises, bypasses the backoff for one final attempt and logs an abandonment with a count: REG-3 blocks. Wrapper obligation declared below. Mutation (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#flush_on_shutdown`: final attempt honours the backoff -> 1 red (`reg_conformance_spec.rb:85` "makes one final attempt even while backing off"). |
+| REG-4 | n/a (profile: browser) | - | Browser teardown with `keepalive`; this SDK has no page teardown. |
+| REG-5 | n/a (profile: browser) | - | Browser teardown flush; this SDK has no page teardown. |
+| REG-6 | implemented | n/a (pure) | Snapshot, then confirm exactly the snapshot: "keeps an item queued when it arrives mid-request", "clears exactly what was sent (positive control)". Mutation (re-appliable): M1 `lib/langsys/discovery.rb` `Discovery#confirm`: confirm clears the live queue, not the snapshot keys -> 1 red (`reg_conformance_spec.rb:169` "keeps an item queued when it arrives mid-request"). |
+| REG-7 | implemented | n/a (pure) | A mutex-guarded in-flight flag; a re-entrant flush is refused with `in_flight`: REG-7 block. Mutation (re-appliable): M1 `lib/langsys/discovery.rb` `Discovery#begin_send`: in-flight guard removed -> 2 red (`reg_conformance_spec.rb:224` "does not start a second send while one is in flight", `reg_conformance_spec.rb:239` "sends the first phrase exactly once across a re-entrant flush"). |
+| REG-8 | provisional | mock | Queue retained, 3s doubling to a 300s ceiling, no send while backing off, reset on first success, and no fight with WIRE-4: REG-8 block. Retention and the later accepted retry are state across calls against a stub that fails on cue. Waits on: CONF-2 shared contract fixture. Mutations (re-appliable): M1 `lib/langsys/discovery.rb` `Discovery#penalise`: backoff ceiling removed -> 1 red (`reg_conformance_spec.rb:287` "doubles the delay on each failure, to a ceiling"); M2 `lib/langsys/discovery.rb` `Discovery#backing_off?`: a backed-off queue sends immediately -> 1 red (`reg_conformance_spec.rb:274` "refuses to send again until the backoff has elapsed"). |
+| REG-9 | provisional | mock | Phrases and blocks form one item list chunked to the server-provided `batch_limit`: "chunks to the server's limit rather than a hardcoded one". The limit and its enforcement are what the API answers. Waits on: CONF-2 shared contract fixture. Mutation (re-appliable): M1 `lib/langsys/discovery.rb` `Discovery#snapshot`: hardcoded batch size instead of the server limit -> 1 red (`reg_conformance_spec.rb:479` "chunks to the server's limit rather than a hardcoded one"). |
+| REG-10 | provisional | mock | One behaviour: never raises (including authorize failing mid-flush and protocol-layer transport errors), always logs, never success-shaped for a skipped or failed write: REG-10 and GATE-5 / REG-10 blocks. The refusal comes from a stub. Waits on: CONF-2 shared contract fixture. Mutations (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#flush_pending`: unresolvable decision raises -> 6 red (`reg_conformance_spec.rb:141` "reports decision_unavailable and retains the queue when authorize fails", `reg_conformance_spec.rb:156` "backs off after an unresolvable decision rather than retrying immediately", `reg_conformance_spec.rb:319` "does not fight WIRE-4's no-storm guard: a failed FETCH adds nothing, backoff drops nothing", +3 more); M2 `lib/langsys/registration_lane.rb` `RegistrationLane#flush_pending`: skipped write reports success -> 3 red (`reg_conformance_spec.rb:401` "never returns a success-shaped result for a skipped write", `client_spec.rb:32` "retains the queue on a read key rather than dropping it (GATE-2)", `reg_conformance_spec.rb:522` "sends nothing to a hint or report endpoint when it cannot write, on every flush path"). |
+| REG-11 | implemented | n/a (pure) | Warns on both ellipsis spellings and still registers; suppresses only when a longer catalog entry shares the prefix, including beside unrelated and same-length entries: REG-11 blocks. Mutations (re-appliable): M1 `lib/langsys/ellipsis.rb` `Ellipsis.ellipsis_stem`: ellipsis detection removed -> 3 red (`reg_conformance_spec.rb:419` "warns but still registers a phrase ending in an ellipsis", `reg_conformance_spec.rb:432` "warns on the three-dot spelling too", `reg_conformance_spec.rb:443` "suppresses registration only when a longer catalog entry shares the prefix"); M2 `lib/langsys/ellipsis.rb` `Ellipsis.truncated_twin?`: suppressed on any other key, not a longer prefix twin -> 1 red (`reg_conformance_spec.rb:545` "still queues an ellipsis phrase beside unrelated and same-length catalog entries"). |
+| REG-12 | implemented | n/a (pure) | Structural on both consumers: `t()` (a nested map is a block; a phrase shaped like a 32-hex id still registers) and `sync` ("counts a block's inner phrases as known and treats a phrase shaped like its id as new"). Mutations (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#queue_missing`: content blocks told apart by string shape -> 1 red (`reg_conformance_spec.rb:468` "registers a phrase that merely looks like a block id"); M2 `lib/langsys/catalog.rb` `Catalog.existing_keys`: nested maps not recognised as content blocks -> 1 red (`reg_conformance_spec.rb:555` "counts a block's inner phrases as known and treats a phrase shaped like its id as new"). |
+| HINT-1 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-2 | implemented | n/a (pure) | Absence with a matcher control: a session that cannot write logs (OBS-1), keeps its queue, and sends nothing to a hint, report or discovery endpoint across `flush_pending` and `flush_on_shutdown`, while the same matcher catches a hint request when one is made: `reg_conformance_spec.rb` HINT-2 block. Mutation (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#flush_pending`: a session that cannot write sends a hint -> 9 red (`reg_conformance_spec.rb:522` "sends nothing to a hint or report endpoint when it cannot write, on every flush path", `client_spec.rb:32` "retains the queue on a read key rather than dropping it (GATE-2)", `gate_conformance_spec.rb:168` "does not POST when the server says write_enabled is false", +6 more). |
+| HINT-3 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-4 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-5 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-6 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-7 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-8 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-9 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-10 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-11 | n/a (profile: browser) | - | Browser report lane. |
+| HINT-12 | n/a (profile: browser) | - | Browser report lane. |
+| ICU-1 | implemented | n/a (pure) | A missing argument selects `other`, on the renderer (ICU-1 block) and through `t()` with no params, pinned separately for params omitted and `params: {}`: "renders the other branch of a select when params is omitted", "renders the other branch of a select when params is empty". Mutations (re-appliable): M1 `lib/langsys/interpolate.rb` `Interpolate.recover`: recovery does not select the other branch -> 19 red (`icu_conformance_spec.rb:33` "renders the `other` branch of a select whose argument was not supplied", `icu_conformance_spec.rb:38` "renders the `other` branch of a plural whose argument was not supplied", `icu_conformance_spec.rb:169` "renders the other branch of a select when params is omitted", +16 more); M2 `lib/langsys/client.rb` `Client#interpolate`: renderer skipped when the caller passes no params -> 4 red (`icu_conformance_spec.rb:169` "renders the other branch of a select when params is omitted", `icu_conformance_spec.rb:173` "renders the other branch of a select when params is empty", `icu_conformance_spec.rb:177` "recovers a plural with no params, `#` becoming the argument name", +1 more). |
+| ICU-2 | implemented | n/a (pure) | Present-but-nil counts as missing, and nil never renders as `0`: ICU-2 block. Mutation (re-appliable): M1 `lib/langsys/interpolate.rb` `Interpolate.render_arg`: nil no longer counts as missing -> 1 red (`icu_conformance_spec.rb:55` "treats a present-but-nil plural argument as absent"). |
+| ICU-3 | implemented | n/a (pure) | Recursive recovery, `#` becoming `{argName}`, supplied arguments still rendering inside a recovered branch: ICU-3 block, and "recovers a plural with no params, `#` becoming the argument name" through `t()`. Mutation (re-appliable): M1 `lib/langsys/interpolate.rb` `Interpolate.apply_hash`: # in a recovered plural not replaced by the argument name -> 5 red (`icu_conformance_spec.rb:77` "emits the literal {argName} for `#` inside a recovered plural, never a number", `icu_conformance_spec.rb:82` "recovers a nested plural inside a recovered select", `icu_conformance_spec.rb:177` "recovers a plural with no params, `#` becoming the argument name", +2 more). |
+| ICU-4 | implemented | n/a (pure) | Names every defaulted argument and the locale, deduplicated per (template, locale), silent without a logger: ICU-4 block, and "surfaces the ICU-4 notice on that path" through `t()`. Mutations (re-appliable): M1 `lib/langsys/interpolate.rb` `Interpolate.note_recovery`: dedup removed -> 1 red (`icu_conformance_spec.rb:133` "deduplicates per (template, locale) for the process lifetime"); M2 `lib/langsys/interpolate.rb` `Interpolate.note_recovery`: notice never emitted -> 5 red (`icu_conformance_spec.rb:119` "names every defaulted argument and the locale", `icu_conformance_spec.rb:124` "fires for plural recoveries as well as select", `icu_conformance_spec.rb:133` "deduplicates per (template, locale) for the process lifetime", +2 more). |
+| ICU-5 | implemented | n/a (pure) | Polish `few`/`many`/`one` discriminating guard, and recovery rewriting only the missing nodes: ICU-5 blocks. Mutation (re-appliable): M1 `lib/langsys/interpolate.rb` `Interpolate.render_plural`: CLDR selection replaced by one/other -> 4 red (`icu_conformance_spec.rb:19` "selects `few` for n=3 in Polish, where a one/other renderer would say `other`", `icu_conformance_spec.rb:23` "selects `many` for n=5 in Polish", `icu_conformance_spec.rb:94` "keeps CLDR selection for a supplied argument when another argument is missing", +1 more). |
+| CID-1 | implemented | n/a (pure) | Cross-implementation fixture `spec/fixtures/custom-id-reference.json` (langsys-php-sdk 8862841): 13/13 hash and 13/13 `serialized_hex`, integrity asserted codepoints-first, through the function the id is hashed from; plus slash, non-ASCII, raw U+2028, UTF-8 bytes and order. Mutations (re-appliable): M1 `lib/langsys/registration.rb` `Langsys.canonical_block_json`: serialization escapes U+2028 (script_safe) -> 7 red (`cid_conformance_spec.rb:66` "row 3 hashes to the shared id", `cid_conformance_spec.rb:66` "row 13 hashes to the shared id", `cid_conformance_spec.rb:70` "row 13 serialises to the shared bytes", +4 more); M2 `lib/langsys/registration.rb` `Langsys.generate_custom_id`: legacy pipe-join hash emitted -> 39 red (`cid_conformance_spec.rb:66` "row 5 hashes to the shared id", `cid_conformance_spec.rb:66` "row 3 hashes to the shared id", `cid_conformance_spec.rb:66` "row 13 hashes to the shared id", +36 more). |
+| CID-2 | implemented | n/a (pure) | Cross-implementation fixture rows `category-empty` and `category-sentinel`, plus the CID-2 block: nil and `__uncategorized__` hash as `''`, including at the content-block caller. Mutation (re-appliable): M1 `lib/langsys/registration.rb` `Langsys.normalize_category`: __uncategorized__ sentinel reaches the hash input -> 3 red (`cid_conformance_spec.rb:110` "never lets the __uncategorized__ sentinel reach the hash input", `cid_conformance_spec.rb:122` "holds at the content-block caller, which passes the sentinel category", `tok_conformance_spec.rb:44` "mints the shared custom_id"). |
+| CID-3 | implemented | n/a (pure) | Both pipe-join spellings resolve on lookup, the canonical id is preferred and the only one emitted: CID-3 blocks. The JS code-unit shape is deliberately not tolerated (below). Mutations (re-appliable): M1 `lib/langsys/html/client_surface.rb` `ClientSurface#lookup_legacy_block`: legacy ids not consulted on lookup -> 4 red (`cid_conformance_spec.rb:136` "resolves a block stored under the legacy pipe-join id", `cid_conformance_spec.rb:177` "resolves a block stored under the empty-category pipe spelling", `cid_conformance_spec.rb:186` "resolves a block stored under the __uncategorized__ sentinel pipe spelling", +1 more); M2 `lib/langsys/registration.rb` `Langsys.legacy_custom_ids`: __uncategorized__ pipe spelling dropped -> 2 red (`cid_conformance_spec.rb:186` "resolves a block stored under the __uncategorized__ sentinel pipe spelling", `cid_conformance_spec.rb:195` "offers both uncategorised spellings, most likely first and deduped"). |
+| CID-4 | implemented | n/a (pure) | A legacy hit attaches only when its phrase set matches, including a collision that shares a phrase with the current block: "declines a collision that shares a phrase with the current block, and queues the block", with the attaching positive control. Mutation (re-appliable): M1 `lib/langsys/html/client_surface.rb` `ClientSurface#lookup_legacy_block`: legacy match attached without the content check -> 1 red (`cid_conformance_spec.rb:247` "declines a collision that shares a phrase with the current block, and queues the block"). |
+| TOK-1 | implemented | n/a (pure) | Cross-implementation fixture `spec/fixtures/canonicalization-reference.json` (TS 4eac870, 26 rows): `script-subtree`, `style-subtree`, `noscript-subtree`, `math-subtree`, `svg-inline-icon`. 8.0.1 block: math excluded on block and page paths; svg text translated in place with `<path>` kept, standalone and inline; an inline svg never costs its block the block's own text. Proven on: block path, page leaf, page standalone svg, apply. Mutations (re-appliable): M1 `lib/langsys/html/canonical.rb` `Html::NON_TOKENIZED_ELEMENTS`: math dropped from the exclusions -> 6 red (`canonicalization_801_spec.rb:73` "produces exactly one phrase from script, style, noscript and math plus ordinary markup", `canonicalization_801_spec.rb:79` "excludes math on the block path", `canonicalization_801_spec.rb:84` "excludes inline math on the page path", +3 more); M2 `lib/langsys/html/canonical.rb` `Html::NON_TOKENIZED_ELEMENTS`: template dropped from the exclusions -> 2 red (`tok_conformance_spec.rb:55` "produces exactly one phrase, the ordinary one", `tok_conformance_spec.rb:65` "emits nothing from <template> while keeping its sibling"); M3 `lib/langsys/html/page.rb` `Page::SKIP_ELEMENTS`: page path skips svg again -> 2 red (`canonicalization_801_spec.rb:89` "tokenizes a standalone svg directly under <body> on the page path", `canonicalization_801_spec.rb:99` "translates a standalone svg's text in place and keeps its <path>"); M4 `lib/langsys/html/page.rb` `Page#walk`: standalone svg branch removed -> 2 red (`canonicalization_801_spec.rb:89` "tokenizes a standalone svg directly under <body> on the page path", `canonicalization_801_spec.rb:99` "translates a standalone svg's text in place and keeps its <path>"). |
+| TOK-2 | implemented | n/a (pure) | The collapse set is exactly JavaScript's `\s`, asserted on `normalize_whitespace` directly (members collapse; U+0085, U+180E, U+200B, U+2060 do not) and trimmed by the same set; cross-implementation fixture rows `nbsp-in-text`, `feff-in-text`, `nel-in-text`, `mvs-in-text`, `line-separators`, `attr-nbsp`, `text-multiline`. Proven on every token site: text, attribute, button value, `<title>`, `meta[content]`, and the re-emit lead/trail detector. VT/FF membership and the C0 rows are held for the strip ruling (table below). Mutations (re-appliable): M1 `lib/langsys/html/canonical.rb` `Html::WHITESPACE`: collapse set back to [[:space:]] -> 8 red (`canonicalization_801_spec.rb:43` "collapses U+FEFF like a space", `canonicalization_801_spec.rb:49` "leaves U+0085 in place", `canonicalization_801_spec.rb:60` "trims a leading and trailing U+FEFF, which String#strip does not", +5 more); M2 `lib/langsys/html/canonical.rb` `Html.normalize_whitespace`: trim by String#strip -> 1 red (`canonicalization_801_spec.rb:55` "trims by the set rather than by String#strip, which also removes U+0000"); M3 `lib/langsys/html/canonical.rb` `Html.whitespace_char?`: re-emit lead/trail detector narrowed -> 1 red (`canonicalization_801_spec.rb:65` "gives the lead/trail re-emit detector the same set"); M4 `lib/langsys/html/page.rb` `Page#translate_meta`: meta content not canonicalised -> 4 red (`mark_srv_gaps_spec.rb:19` "collapses U+00A0 in a description meta exactly as in a text node", `mark_srv_gaps_spec.rb:28` "collapses U+2028 in an og:title meta", `mark_srv_gaps_spec.rb:36` "gives a meta and a text node carrying the same authored string one id", +1 more); M5 `lib/langsys/html/page.rb` `Page#process_head`: title trimmed raw -> 1 red (`tok_conformance_spec.rb:127` "normalises a <title> rather than trimming it raw"). |
+| TOK-3 | partial | n/a (pure) | Block path: the twenty-seven in normative order, "carries exactly the twenty-seven, in the normative order", "produces three phrases in list order and none from unlisted attributes", cross-implementation fixture rows `attr-original-15`, `attr-new-data-confirm`, `attr-new-data-bs-title`, `attr-all-new-twelve`, `attr-order-two-on-one-element`. Gap, page path: a page-path block host's own translatable attributes are not tokenized in TOK-3 order before its content, and text outside block elements (top-level void and inline elements, textarea/select/option, bare top-level link text) is dropped; Ruby and PHP differ from the TS fixture on the same seven page-path rows. The page registration shape is routed to Langsys and the operator, and the fixes are held until that ruling. Mutations (re-appliable): M1 `lib/langsys/html/attributes.rb` `Html::DEFAULT_TRANSLATABLE_ATTRIBUTES`: first two attributes swapped -> 1 red (`tok_conformance_spec.rb:152` "carries exactly the twenty-seven, in the normative order"); M2 `lib/langsys/html/attributes.rb` `Html::DEFAULT_TRANSLATABLE_ATTRIBUTES`: data-placeholder dropped -> 3 red (`tok_conformance_spec.rb:152` "carries exactly the twenty-seven, in the normative order", `tok_conformance_spec.rb:39` "tokenizes to the shared expectation", `tok_conformance_spec.rb:44` "mints the shared custom_id"). |
+| TOK-4 | partial | n/a (pure) | Attribute values collapse exactly as text nodes do on the block path and on apply: one id for a text node and a `title`; register/lookup pairs for `alt` (page path) and `placeholder` (`translate_content_block`) spelled with a line break, a doubled space and a no-break space. Gap, page path: the host-attribute half of the same routed registration-shape ruling as TOK-3. Mutations (re-appliable): M1 `lib/langsys/html/parser.rb` `Html.collect_element`: attribute token trimmed, not collapsed -> 14 red (`register_lookup_801_spec.rb:65` "registers the canonical form for every spelling (the register half)", `register_lookup_801_spec.rb:72` "translates an alt spelled with a doubled space inside a block, on the page path", `register_lookup_801_spec.rb:72` "translates an alt spelled with a no-break space inside a block, on the page path", +11 more); M2 `lib/langsys/html/parser.rb` `Html.apply_attributes`: attribute looked up by its raw value -> 6 red (`register_lookup_801_spec.rb:72` "translates an alt spelled with a no-break space inside a block, on the page path", `register_lookup_801_spec.rb:72` "translates an alt spelled with a line break inside a block, on the page path", `register_lookup_801_spec.rb:72` "translates an alt spelled with a doubled space inside a block, on the page path", +3 more). |
+| TOK-5 | implemented | n/a (pure) | `%name%` in captured markup normalises to `{name}` before the id, with the TS pattern, after the collapse, on block and page paths, for text and attribute tokens, and on lookup; percentages in prose are left alone (`50%off20%`); render-time `%name%` substitutes identifier keys only. Cross-implementation fixture rows `percent-name-in-markup`, `brace-name-in-markup`. Mutations (re-appliable): M1 `lib/langsys/html/canonical.rb` `Html.canonical_token`: capture-time %name% normalisation removed -> 9 red (`canonicalization_801_spec.rb:122` "tokenizes captured %name% as {name}", `canonicalization_801_spec.rb:126` "gives %name% markup the same id as the brace-authored form", `canonicalization_801_spec.rb:132` "normalises inside an attribute token too", +6 more); M2 `lib/langsys/html/parser.rb` `Html.text_content`: single-phrase text not canonicalised -> 1 red (`canonicalization_801_spec.rb:141` "finds a {name} translation for %name% markup on the page path (register/lookup pair)"); M3 `lib/langsys/interpolate.rb` `Interpolate::PERCENT_SLOT`: render-time escape widened to dotted keys -> 1 red (`canonicalization_801_spec.rb:165` "does not substitute a dotted key at render time (identifier pattern only)"). |
+| MARK-1 | implemented | n/a (pure) | A rendered block host carries `data-ls-contentblock`, re-derived with the tokenizer and stamped whether or not the block resolved; a rendered single-phrase host carries `data-ls-phrase` naming the source phrase; placement holds with `>` in quoted attributes and a leading comment. Mutations (re-appliable): M1 `lib/langsys/html/page.rb` `Page#apply_or_queue_block`: block host not stamped -> 5 red (`tok_conformance_spec.rb:243` "stamps data-ls-contentblock with the id the tokenizer independently derives", `tok_conformance_spec.rb:259` "stamps the id even when the block is not yet registered", `identity_paths_801_spec.rb:115` "stamps a host whose double-quoted title contains >", +2 more); M2 `lib/langsys/html/page.rb` `Page#translate_leaf`: single-phrase host not stamped -> 3 red (`mark_srv_gaps_spec.rb:113` "stamps data-ls-phrase on a host rendered as a single phrase", `html_spec.rb:62` "translates the title, simple blocks, and sets html lang", `identity_paths_801_spec.rb:136` "stamps a single-phrase host whose title contains >"). |
+| MARK-2 | implemented | n/a (pure) | Both spellings of `category`, `contentblock` and `phrase` on read. A phrase host is excised inside the tokenizer, so every path gets it: block, declared host, page leaf, apply. The content-block attribute is classified in one place (`Html.classify_block_attribute`): declaration `1/true/yes/on`; opt-out `0/false/off/no` and bare (`BARE_BLOCK_ATTRIBUTE`, contested and routed); identity for anything else, left whole on every path, including nested inside a declared block (excised, per the ruling). Mutations (re-appliable): M1 `lib/langsys/html/parser.rb` `Html.walk_extract`: tokenizer-level phrase-host excision removed -> 10 red (`identity_paths_801_spec.rb:32` "excises a data-ls-phrase host on the block path", `identity_paths_801_spec.rb:32` "excises a data-langsys-phrase host on the block path", `identity_paths_801_spec.rb:37` "excises a data-ls-phrase host through translate_content_block", +7 more); M2 `lib/langsys/html/parser.rb` `Html.walk_extract`: nested identity host not excised -> 6 red (`register_lookup_801_spec.rb:35` "excises a nested data-ls-contentblock identity host from the block path's tokens", `register_lookup_801_spec.rb:35` "excises a nested data-langsys-contentblock identity host from the block path's tokens", `register_lookup_801_spec.rb:40` "excises a nested data-langsys-contentblock identity host from a declared block on the page path", +3 more); M3 `lib/langsys/html/page.rb` `Page#walk`: page walker identity skip removed -> 3 red (`identity_paths_801_spec.rb:74` "leaves a data-ls-contentblock identity value whole: no registration, no re-stamp", `identity_paths_801_spec.rb:74` "leaves a data-langsys-contentblock identity value whole: no registration, no re-stamp", `identity_paths_801_spec.rb:105` "does not rewrite the text of an identity host"); M4 `lib/langsys/html/canonical.rb` `Html::PHRASE_MARKERS`: legacy data-langsys-phrase not read -> 5 red (`identity_paths_801_spec.rb:32` "excises a data-langsys-phrase host on the block path", `identity_paths_801_spec.rb:37` "excises a data-langsys-phrase host through translate_content_block", `mark_srv_gaps_spec.rb:56` "does not re-split a block containing a data-langsys-phrase host", +2 more); M5 `lib/langsys/html/canonical.rb` `Html::CONTENT_BLOCK_MARKERS`: legacy data-langsys-contentblock not read -> 10 red (`register_lookup_801_spec.rb:35` "excises a nested data-langsys-contentblock identity host from the block path's tokens", `register_lookup_801_spec.rb:40` "excises a nested data-langsys-contentblock identity host from a declared block on the page path", `register_lookup_801_spec.rb:47` "does not rewrite a nested data-langsys-contentblock identity host whose text matches a sibling token", +7 more); M6 `lib/langsys/html/page.rb` `Page::MARKER_PREFIXES`: legacy data-langsys-category not read -> 10 red (`tok_conformance_spec.rb:280` "reads a category from data-langsys-category (legacy spelling)", `html_spec.rb:77` "honors data-langsys-category and translate=no", `srv_conformance_spec.rb:9` "emits the request locale's translation into the served bytes", +7 more); M7 `lib/langsys/html/canonical.rb` `Html.classify_block_attribute`: identity value read as a declaration -> 8 red (`register_lookup_801_spec.rb:35` "excises a nested data-langsys-contentblock identity host from the block path's tokens", `register_lookup_801_spec.rb:35` "excises a nested data-ls-contentblock identity host from the block path's tokens", `register_lookup_801_spec.rb:40` "excises a nested data-ls-contentblock identity host from a declared block on the page path", +5 more); M8 `lib/langsys/html/canonical.rb` `Html::BLOCK_OPT_OUT_VALUES`: off/no read as identity, not opt-out -> 4 red (`identity_paths_801_spec.rb:83` "walks data-ls-contentblock="no" as ordinary content", `identity_paths_801_spec.rb:83` "walks data-langsys-contentblock="off" as ordinary content", `identity_paths_801_spec.rb:83` "walks data-langsys-contentblock="no" as ordinary content", +1 more). |
+| SSR-1 | n/a (profile: browser) | - | Browser-core SSR seeding; this is a server SDK. |
+| SSR-2 | n/a (profile: browser) | - | Browser-core SSR seeding; this is a server SDK. |
+| SSR-3 | n/a (profile: browser) | - | Browser-core SSR seeding; this is a server SDK. |
+| SRV-1 | implemented | n/a (pure) | Asserted on the served bytes: the request locale's translation is emitted, and a genuine miss emits the base language and is recorded: "emits the request locale's translation into the served bytes", "emits the base language for a genuine miss and reports it (control)". Mutation (re-appliable): M1 `lib/langsys/html/page.rb` `Page#translate_leaf`: served bytes keep the source text -> 33 red (`srv_conformance_spec.rb:9` "emits the request locale's translation into the served bytes", `srv_conformance_spec.rb:21` "emits the base language for a genuine miss and reports it (control)", `canonicalization_801_spec.rb:89` "tokenizes a standalone svg directly under <body> on the page path", +30 more). |
+| SRV-2 | implemented | n/a (pure) | Isolation: two renders held mid-walk at once by a two-party barrier do not see each other's catalog; every render of a 30-iteration loop keeps its own locale; no process-global holds request state. Mutation (re-appliable): M1 `lib/langsys/html/page.rb` `Page (every @locale)`: request locale held in a class variable -> 1 red (`srv_conformance_spec.rb:39` "keeps two renders interleaved MID-RENDER from seeing each other's catalog"). |
+| SRV-3 | partial | mock | Within one request, nothing is accepted during the render and the miss is accepted only after the post-response flush ("registers nothing during the render, only after the response"); a read-only key pushes nothing, with a write-key positive control. Gap, measured by the Rails lane: the queue is process-wide, so when requests overlap, one request's post-response flush sends misses another request recorded before that request has rendered. The fix is a request-scope hold in the core; the operator is holding that seam for their ruling, because it adds public request-scope calls. Contract: Rails' pending two-request example. Mutation (re-appliable): M1 `lib/langsys/client.rb` `Client#translate`: misses registered inline during the render -> 46 red (`srv_conformance_spec.rb:168` "registers nothing during the render, only after the response", `canonicalization_801_spec.rb:89` "tokenizes a standalone svg directly under <body> on the page path", `canonicalization_801_spec.rb:136` "normalises on the page path", +43 more). |
+| SRV-4 | n/a (architecture: terminal-HTML server SDK; `translate_page` emits finished HTML that no client runtime hydrates, so there is no catalog hand-off; becomes live if this SDK ever emits a seed for a client runtime) | - | 8.0.1 scopes SRV-4 to SDKs in a hydration hand-off. |
+| SRV-5 | implemented | n/a (pure) | Once-per-subtree half, measured: a depth-3 nested block registers each miss exactly once, counted rather than compared as sets: "posts a repeated token from a depth-3 nested block exactly once" counts the items actually posted, and "registers each miss in a depth-3 nested block exactly once" tallies the queue. Fail-loudly half: n/a on mechanism, as the rule text provides for a DOM-walking SDK; there is no component model and so no `lazy`/`Suspense` child. The property is held twice (the walker captures each leaf once and excises stamped hosts on a re-walk; the queue coalesces identical items), so the mutation defeats both. Mutation (re-appliable): M1 `lib/langsys/html/page.rb` `Page#walk_block + Discovery#queue_phrase/#queue_block`: every leaf captured twice AND the queue's coalescing removed -> 32 red (`identity_paths_801_spec.rb:196` "registers each miss in a depth-3 nested block exactly once", `srv_conformance_spec.rb:219` "posts a repeated token from a depth-3 nested block exactly once", `canonicalization_801_spec.rb:84` "excludes inline math on the page path", +29 more). |
+| BIND-1 | n/a (profile: binding) | - | Core SDK. Binding rules bind `langsys-ruby-rails`, which delegates onto these rows. |
+| BIND-2 | n/a (profile: binding) | - | Core SDK; see BIND-1. |
+| BIND-3 | n/a (profile: binding) | - | Core SDK; see BIND-1. |
+| BIND-4 | n/a (profile: binding) | - | Core SDK; see BIND-1. |
+| BIND-5 | n/a (profile: binding) | - | Core SDK; see BIND-1. |
+| BIND-6 | n/a (profile: binding) | - | Core SDK; see BIND-1. |
+| GRANT-1 | n/a (profile: browser) | - | Browser grant lane. Affirmative non-participation is still tested: `wire_conformance_spec.rb` "never sends an X-Write-Grant header on any request", with a matcher control (posture below). |
+| GRANT-2 | n/a (profile: browser) | - | Browser grant lane; see GRANT-1. |
+| GRANT-3 | n/a (profile: browser) | - | Browser grant lane; see GRANT-1. |
+| GRANT-4 | n/a (profile: browser) | - | Browser grant lane; see GRANT-1. |
+| CACHE-1 | implemented | n/a (pure) | Scoping: catalog keys carry the project id and the normalised locale. "does not serve one project's catalog to another project sharing the cache backend"; "resolves en-US and en-us to the same cache entry rather than fetching twice". Mutations (re-appliable): M1 `lib/langsys/catalog.rb` `Catalog#key`: project id dropped from the cache key -> 1 red (`wire_conformance_spec.rb:226` "does not serve one project's catalog to another project sharing the cache backend"); M2 `lib/langsys/catalog.rb` `Catalog#get`: locale not normalised before keying -> 160 red (`wire_conformance_spec.rb:226` "does not serve one project's catalog to another project sharing the cache backend", `canonicalization_801_spec.rb:84` "excludes inline math on the page path", `canonicalization_801_spec.rb:89` "tokenizes a standalone svg directly under <body> on the page path", +157 more). |
+| OBS-1 | implemented | n/a (pure) | Surfaced exactly once per process across three flushes: "warns once when the session cannot register what it has discovered". Mutations (re-appliable): M1 `lib/langsys/registration_lane.rb` `RegistrationLane#warn_unusable_capability`: warns on every flush -> 1 red (`reg_conformance_spec.rb:505` "warns once when the session cannot register what it has discovered"); M2 `lib/langsys/registration_lane.rb` `RegistrationLane#warn_unusable_capability`: never warns -> 1 red (`reg_conformance_spec.rb:505` "warns once when the session cannot register what it has discovered"). |
+| WIRE-1 | implemented | live | The raw key in `X-Authorization`, no `Bearer`: "sends the raw key with no Bearer prefix"; every live example authenticates this way. Mutation (re-appliable): M1 `lib/langsys/http.rb` `Http#send_request`: Bearer Authorization instead of X-Authorization -> 1 red (`wire_conformance_spec.rb:179` "sends the raw key with no Bearer prefix"). |
+| WIRE-2 | provisional | mock | A 204 with an empty body is success and marks the item registered: "treats a 204 with no body as success". The contract fixture is specified to answer 204 where the real API does. Waits on: CONF-2 shared contract fixture. Mutation (re-appliable): M1 `lib/langsys/http.rb` `Http#parse`: a 204 treated as an error -> 1 red (`reg_conformance_spec.rb:495` "treats a 204 with no body as success"). |
+| WIRE-3 | implemented | live | A lowercase locale on the wire from a client set to `es-ES`, display casing kept in HTML, `en-US`/`en-us` one cache entry. Live: `live_spec.rb` "sends a lowercase locale on the wire (WIRE-3)". Mutation (re-appliable): M1 `lib/langsys/locale.rb` `Locale.normalize_locale`: locale not lowercased at the wire boundary -> 160 red (`wire_conformance_spec.rb:142` "sends a lowercase locale on the wire even when set with region casing", `wire_conformance_spec.rb:152` "resolves en-US and en-us to the same cache entry rather than fetching twice", `wire_conformance_spec.rb:168` "keeps display casing intact in translated HTML output", +157 more). |
+| WIRE-4 | implemented | n/a (pure) | In-process failure handling: all three entry points and `flush_pending` degrade instead of raising on socket and protocol-layer failures (`OpenSSL::SSL::SSLError`, `Net::HTTPBadResponse`, `EOFError`, aimed at the GET every entry point makes), log it, and record nothing while the catalog is unavailable, with a queue-fills positive control. Measured and routed, not graded against a MUST: a failing catalog fetch is not negatively cached, so every lookup repeats the GET (5 `t()` calls make 5 GETs, an 11-token page 11; live, locale `zz-zz` answered `ValidationError` on each of 5 calls). Mutations (re-appliable): M1 `lib/langsys/http.rb` `Http#perform`: transport rescue narrowed to socket errors -> 15 red (`wire_conformance_spec.rb:79` "degrades t() instead of raising", `wire_conformance_spec.rb:85` "degrades translate_content_block instead of raising", `wire_conformance_spec.rb:90` "degrades translate_page instead of raising", +12 more); M2 `lib/langsys/client.rb` `Client#translate`: unavailable catalog treated as empty, so misses queue -> 2 red (`reg_conformance_spec.rb:319` "does not fight WIRE-4's no-storm guard: a failed FETCH adds nothing, backoff drops nothing", `wire_conformance_spec.rb:114` "records nothing when the catalog could not be fetched"). |
+| WIRE-5 | implemented | live | `api_url:` and `LANGSYS_API_URL` redirect the API base; the live suite runs entirely through `LANGSYS_API_URL`, every hermetic example through `api_url:`. Mutation (re-appliable): M1 `lib/langsys/config.rb` `Config.resolve`: api_url and LANGSYS_API_URL ignored -> 201 red (`canonicalization_801_spec.rb:84` "excludes inline math on the page path", `canonicalization_801_spec.rb:89` "tokenizes a standalone svg directly under <body> on the page path", `canonicalization_801_spec.rb:94` "never lets an inline svg cost its block the block's own text, on the page path", +198 more). |
+| CONF-1 | provisional | mock | Convertible spy assertions were converted this re-row to acceptance or state (`registered?`, the returned reason, a translated value, a refusing second fetch). Every-path clause: TOK-1, TOK-2, TOK-5 and MARK-2 name their paths, and extract/apply symmetry is asserted. Call-count and body assertions that remain by design, each proving an absence or a count a stub cannot show another way: `client_spec.rb` "retains the queue on a read key rather than dropping it (GATE-2)" (no POST) and "falls back to base_locale when the source is empty, without calling authorize"; `gate_conformance_spec.rb` "does not POST when the server says write_enabled is false"; `identity_paths_801_spec.rb` "routes t(), translate_content_block and both page-path shapes into the one registration lane" (no report lane); `reg_conformance_spec.rb` "coalesces a burst from one render into a single request", "sends the first phrase exactly once across a re-entrant flush", "chunks to the server's limit rather than a hardcoded one", and the HINT-2 pair; `srv_conformance_spec.rb` "pushes nothing from a read-only key" and "posts a repeated token from a depth-3 nested block exactly once" (counts posted items, as SRV-5 prescribes). Waits on: CONF-2 shared contract fixture. Mutations (re-appliable): M1 `lib/langsys/html/parser.rb` `Html.walk_apply`: apply no longer skips excluded subtrees -> 1 red (`register_lookup_801_spec.rb:96` "does not rewrite <math> text that reads like a translated token"); M2 `lib/langsys/html/parser.rb` `Html.walk_apply`: apply no longer skips phrase-marked hosts -> 2 red (`identity_paths_801_spec.rb:52` "does not rewrite a phrase-marked host whose text matches a sibling token, on the page path", `identity_paths_801_spec.rb:60` "does not rewrite it on the block path either"); M3 `lib/langsys/html/parser.rb` `Html.walk_apply`: apply no longer skips identity hosts -> 2 red (`register_lookup_801_spec.rb:47` "does not rewrite a nested data-langsys-contentblock identity host whose text matches a sibling token", `register_lookup_801_spec.rb:47` "does not rewrite a nested data-ls-contentblock identity host whose text matches a sibling token"). |
+| CONF-2 | implemented | n/a (pure) | Meta-rule, discharged by this document and its checker: every row carries a tier; `implemented` requires live, contract or n/a (pure) and `provisional` requires mock, enforced by `Langsys::ConformanceChecker` in `rake conformance:check` and `spec/conformance_doc_spec.rb`. The shared contract fixture does not exist, so each row whose evidence it would change is `provisional` and says so. |
+| CONF-3 | implemented | n/a (pure) | Meta-rule: every row claiming runtime behaviour names a re-appliable mutation (file, symbol, change) and the tests it turns red; 84 mutations over 49 rules, run on scratch copies of this tree with the originals restored byte-identical afterwards. `spec/conformance_doc_spec.rb` fails the build if a claimed row stops naming one. The fleet mutation-manifest harness is a queued item, not a gate. |
 
-## Required posture — affirmative non-participation in the grant lane
+## Held and measured rows (not rules)
 
-`n/a` is not the same as silent. This SDK MUST carry a test asserting that **no `X-Write-Grant`
-header is ever sent**, matched **case-insensitively** — the shape langsys-php pins at
-`tests/Http/HttpClientTest.php::testNoWriteGrantHeaderIsSent`, asserting over the assembled
-header set rather than over a config flag, so it fires regardless of how grant support is
-eventually configured and cannot be walked past by an implementation that invents a different
-config shape.
+Held for the operator's strip ruling. Nothing is built for these.
 
-**This is load-bearing for GATE-1, not a formality.** The server's gate is
-`type-allows-write OR valid-grant`, so a grant can make a *read* key write-enabled. Any
-read-key short-circuit in the write decision — skipping re-authorization because the key is
-read-typed — is sound **only while this SDK sends no grant**. If grant support ever lands, that
-shortcut must stop short-circuiting and resolve per request like `ip_write`. The test is what
-makes the shortcut's precondition falsifiable instead of remembered.
-
-## GATE-3 — declared process-level posture
-
-Required by GATE-3's carve-out, which is available *only* with an explicit declaration
-rather than by default.
-
-The write decision lives on the client instance and is **never persisted**: it is stripped
-before any cache write (GATE-4) and never read back out of one. But a Ruby client object
-outlives a request under any threaded or forking server, so instance state is not
-request-scoped by accident of process death.
-
-Two things follow, and both are implemented rather than asserted:
-
-- **The decision is compared by recency, not by source.** Both slots (authorize and the
-  catalog envelope) carry a monotonic stamp and the newest wins. Fixed precedence was the
-  original implementation and it was wrong: the catalog slot is written only on a live
-  fetch and the memory tier has no TTL, so one recorded decision outranked every authorize
-  after it — reporting a closed gate as open in one direction. Both shadow directions are
-  now tested.
-- **`Client#reset_write_decision!`** drops it at a request boundary. A long-lived host
-  (Rails, Puma, Falcon) should call it per request rather than rely on process lifetime.
-  The framework wrapper is the right place to wire that, and this SDK cannot do it for
-  them — which is why it is declared here rather than assumed.
-
-## On the JS code-unit legacy shape, and why it is not tolerated here
-
-CID-3 names three historical shapes: the two PHP pipe-join variants and the JS code-unit
-hash. This SDK tolerates the two pipe variants and **not** the code-unit hash.
-
-The basis is the population, not convenience: code-unit ids were minted by published
-browser SDKs, and tolerance for them lives in the browser core's own `md5Legacy` /
-`generateLegacyCustomId` exports — which CID-3 says to *call*, not to reimplement, precisely
-because a port written from the description gets Latin-1 right and CJK, Cyrillic, Greek,
-Hebrew and Arabic wrong. The shipping PHP SDK's tolerance is pipe-only for the same reason,
-so this is fleet precedent rather than a local shortcut. Confirmed with the program rather
-than decided here; the profile split is queued as a CID-3 clarifying sentence in the next
-spec batch.
-
-## Provenance
-
-Every citation in this file is re-derivable. The commands, not the values, are the record:
-
-```
-# Spec v8 blob this file rows against
-git -C ../langsys2 ls-tree origin/feature/838_write_key_gating docs/sdk-spec.mdx
-#   -> b657b490f07615b889081c0ac5244ec4bd73bf81   (tip 483f98fb)
-
-# Rule count in that blob
-git -C ../langsys2 cat-file blob b657b490 | grep -cE '^### [A-Z]+-[0-9]+ '
-#   -> 79
-
-# Shared canonicalization fixture (19 cases), vendored at spec/fixtures/
-git -C ../langsys-js-typescript rev-parse 6596faf:tests/fixtures/canonicalization-reference.json
-#   -> e4c1f185974fbf2ebda6154f36b8ed7416f1d7fa
-git hash-object spec/fixtures/canonicalization-reference.json     # must match
-
-# Shared custom_id fixture (13 rows), vendored at spec/fixtures/
-git -C ../langsys-php-sdk rev-parse 8862841:tests/fixtures/custom-id-reference.json
-#   -> 60dc9b33ecfd5fa3256fca7d36063ceb8ef1a00a
-git hash-object spec/fixtures/custom-id-reference.json            # must match
-
-# TOK-3's twenty-seven, order included, against the PHP source
-sed -n '26,60p' ../langsys-php-sdk/src/Html/HtmlParser.php | grep -oE "'[a-z-]+'" | tr -d "'"
-```
-
-Both fixture blobs are asserted by the suite, so a vendored copy that drifts fails the
-build rather than the reader.
-
-**On `rbs -I sig validate`, and what it does not prove.** It checks the signatures are
-internally well-formed; it does not check them against the implementation. Until this lane
-`sig/langsys.rbs` declared none of `Html`, `Interpolate` or `Cldr`, so citing a green
-`rbs` run as evidence about a tokenizer change was citing a check that could not have
-failed — the same vacuous-guard shape this repo has already recorded twice. The three
-modules are now declared, which makes the run meaningful for what it covers; a green
-`rbs` still means "these signatures are coherent", never "the code matches them".
-
-## On TOK-1, and why the previous pass was accidental
-
-`<script>` and `<style>` produced no tokens before this lane, and the fixture rows for both
-said *agree*. That was not an exclusion. Nokogiri models their children as `CDATA` nodes,
-the walker tested `child.text?`, and `text?` is false for CDATA — so the two elements were
-skipped by a property of libxml2's node modelling, with no exclusion list anywhere in the
-content-block path. Swap the parser, or hand it a document where those children parse as
-text, and both start leaking with nothing in the code having changed.
-
-`<noscript>` is the same path without the accident: libxml2 parses its children as elements,
-so `Enable JavaScript` was tokenized and registered. That is the divergence the fixture row
-records, and it is the one that proves the pass on the other two was luck.
-
-The exclusion is now by element name, and the test asserts the predicate directly rather
-than only the outcome.
-
-**Two CODE defects predate this lane. No row was re-graded, and an earlier draft of this
-paragraph said otherwise — there were no TOK, MARK or SRV rows in this file before this
-lane, because v7 had 67 rules and no TOK family at all.** What was wrong was the
-implementation, not the record of it.
-
-`script` and `style` were passing TOK-1's intent by accident of libxml2's CDATA modelling,
-with no exclusion anywhere in the content-block path — a pass that would have vanished the
-moment the parser changed. And the tokenizer's whitespace class was `\s`, ASCII-only in
-Ruby, so every `U+00A0` and `U+2028`/`U+2029` in customer content minted an id no other SDK
-could reproduce. Four of the nineteen shared fixture rows measured divergent on first run;
-all four matched `langsys-php` exactly, which is what the fixture's per-lane columns are for.
-
-**A fourth token path was missed entirely and found by review**, not by me: `translate_meta`
-handed `meta["content"]` to the translator raw. It is worth recording why my search could not
-see it — I grepped for the whitespace handling that was *wrong* (`\s`, `strip`, `split`), and
-this path did none of them. TOK-2 says find every site that turns a text node into a token;
-the sites that do nothing at all are invisible to a search shaped like that one.
-
-## Measured, not changed: `svg`, `math`, and the two paths
-
-TOK-1 does not name `<svg>` or `<math>`. This SDK has two tokenizing paths and they
-disagree about them:
-
-| element | content-block path (feeds `registration.rb`) | page path (`translate_page`) |
+| Item | Grade | Note |
 |---|---|---|
-| `script` | clean (now by exclusion, previously by CDATA accident) | clean |
-| `style` | clean (now by exclusion, previously by CDATA accident) | clean |
-| `noscript` | **leaked** before this lane; now clean | clean |
-| `template` | **leaked** before this lane; now clean | clean |
-| `svg` | **leaks** `Label` from `<svg><text>Label</text></svg>` | **leaks when nested** — see below |
-| `math` | **leaks** `Label` from `<math><mi>Label</mi></math>` | **leaks when nested** — see below |
+| C0 parser split: U+0001–0008, 000B, 000C, 000E–001F dropped from DOM text, raw and as character references, on both parsers | held (strip ruling) | Measured on Nokogiri 1.19.4 / libxml2 2.13.9 and sent to Langsys and Reviewer; 8.0.1 records the libxml2 version boundary |
+| U+001C–001F non-membership in the collapse set | held (strip ruling) | Moot if the strip is adopted |
+| U+000B and U+000C membership | held (strip ruling) | Members of both the old `[[:space:]]` class and the 8.0.1 set |
+| Attribute-path C0 vector | held (strip ruling) | |
 
-**Correction: "page path: clean" was true only at the TOP LEVEL, and an earlier version of
-this table said it without that qualifier.** `SKIP_ELEMENTS` guards the element walk, but a
-leaf block's inner HTML is handed to `extract_phrases`, which has its own exclusion list —
-and `svg`/`math` are deliberately not on it. Measured:
-`<p>Hello <b>there</b> <svg><text>Label</text></svg></p>` queues the block
-`["Hello", "there", "Label"]` on the page path, `math` likewise. So the two paths agree on
-nested SVG (both leak) and disagree only on a top-level one. The fleet decision below was
-being deferred on a measurement that understated it.
+Strip-independent parser residuals, pinned by `identity_paths_801_spec.rb` "parser residuals
+independent of the strip ruling" on both parsers, guarded on libxml2 2.13.x so a version bump
+forces a re-measure:
 
-`Page::SKIP_ELEMENTS` drops top-level `svg` and `math`; neither tokenizing path drops a
-nested one. The four TOK-1 names are now aligned across both paths. **`svg` and `math` are
-left exactly as they are, deliberately** — no rule names them, and aligning would change the
-id of every block containing inline SVG text. Which way to align is a fleet decision, not
-this lane's. Reported rather than settled, now on a correct measurement.
-
-## Measured, not adopted: the `U+FEFF` delta
-
-`[[:space:]]` is Unicode-aware in Ruby and covers `U+00A0`, `U+2028`, `U+2029` and `U+3000`.
-JavaScript's `\s` covers all of those **and** `U+FEFF`, which `[[:space:]]` does not.
-
-No rule names `U+FEFF` and no fixture row exercises it, so adopting it here would be one
-lane inventing a contract detail binding four SDKs. Measured and reported instead. Neither
-class matches `U+200B`, so the two agree there.
-
-## On GATE-8 and the two meanings of absence
-
-`write_enabled` can be absent for two different reasons: a pre-capability server omitted
-it, or GATE-4 stripped it from a payload this SDK cached itself. This implementation
-applies the fallback to **both**, for `read` and plain `write` keys only, and **never** for
-`ip_write` — which pays a live authorize instead when the cache is warm.
-
-That asymmetry is deliberate. It is safe for plain keys because the server invariant holds
-`write_enabled ≡ key_type` for them, and it is unsafe for `ip_write` by definition, because
-the decision is address-dependent and no cached payload can express it. Confirmed as the
-fleet reading rather than assumed locally; the underlying ambiguity in the rule text is
-queued for a clarifying sentence in the next spec batch.
-
-## Summary
-
-Counts are **computed from the rules table above, not asserted alongside it**, and
-`spec/conformance_doc_spec.rb` fails the build when the two disagree. Wave 2 shipped a
-hand-maintained summary that reconciled with nothing in its own table — it miscounted,
-graded rules as implemented that the table marked otherwise, and had no bucket for two of
-the table's statuses. A tally of 60-odd rows drifts on the first edit; the only version
-worth reading is one that cannot.
-
-| Status | Count |
+| Input (Nokogiri 1.19.4, libxml2 2.13.9) | `Nokogiri::HTML` and `Nokogiri::HTML.fragment` |
 |---|---|
-| implemented | 45 |
-| provisional | 2 |
-| partial | 1 |
-| not implemented | 3 |
-| n/a — profile | 26 |
-| n/a — architecture | 2 |
-| **total** | **79** |
+| raw U+0000 in text | becomes U+0020 |
+| `&#x00;` in text | dropped |
+| lone CR | kept raw (0D) |
+| CRLF | kept raw (0D 0A) |
+| raw C0 in an attribute value | kept byte for byte |
+| `&#x1C;` inside an attribute value | truncates the value: `title="a&#x1C;b"` reads `a` |
 
-`provisional` is CAT-1 and CAT-2 — implemented, but resting on mocked transport only, which
-CONF-2 does not count as proof. `not implemented` is GATE-7 (no coverage-property test that
-every detection path feeds exactly one lane), CONF-3 (mutation proofs are run and reported
-each wave but are not a committed, re-runnable suite) and SRV-4 (no client hand-off exists;
-see its row). `n/a — architecture` is GATE-6 and SRV-5, each on a stated mechanism.
+Parse model (fleet probe d), vendored `spec/fixtures/parse-model-reference.json` (langsys-php-sdk
+5400248, blob a3b0cf8c): block-path tokens equal libxml2's recorded tokens on 7 of 7 inputs, and
+agree with the JS family on 5 of 7; the split is the raw-text `textarea` and `title` rows.
 
-**The two kinds of `n/a` are kept apart deliberately.** `n/a — profile` means the rule
-addresses a different kind of SDK and nothing here could satisfy it; it is stable, and goes
-stale only if that rule's Profiles line moves. `n/a — architecture` means the rule *applies*
-to this profile but has nothing to bind to in this implementation — GATE-6 is `Profiles: all`
-and is unfalsifiable here only because this SDK has no report lane at all. That is a fact
-about the SDK, not the rule, so it can rot under you with nothing in the spec changing.
-Collapsing the two labels hides exactly the row that rots silently.
+Fleet splits recorded here and routed, not settled by this lane:
 
-## REG-3 — declared wrapper obligation
+| Split | Ruby | Elsewhere | Status |
+|---|---|---|---|
+| Page-path registration shape against the TS fixture | differs on attr-multiline, attr-nbsp, attr-original-15, attr-new-data-confirm, attr-new-data-bs-title, attr-order-two-on-one-element, attr-all-new-twelve | PHP differs on the same seven | routed to Langsys and the operator; TOK-3 and TOK-4 partial |
+| svg registration shape | behaviour pinned only | PHP registers a block, Python a phrase | same ruling |
+| Bare `data-ls-contentblock` | opt-out, in one constant | Python opt-out; PHP truthy with no identity class | contested, routed |
+| Identity host nested in a declared block | excised | TS folds; Python excises | ruled: excise |
+| Apply strategy | keyed by canonical token on both paths; all 8 positional vectors correct | | reported |
 
-`flush_on_shutdown` runs from an `at_exit` hook when the client is built with
-`auto_flush: true`. **That path is best-effort and must not be relied on**: `at_exit` does not
-run on an OOM kill, on `SIGKILL`, or on a hard request timeout, and there is no later page in
-the same session to recover on the way a browser has.
+## Declared postures
 
-So the reliable path is the public manual flush, and on the server profile the host owns when
-it runs. The library seam is `Client#flush_pending` (and `#flush_if_due` for the debounce).
-The lifecycle hook belongs to the framework wrapper — `langsys-ruby-rails`, not this repo —
-which should flush at the end of a request or in a shutdown callback. Declared here rather
-than assumed, the same way GATE-3's request-boundary reset is.
+**GATE-3, process level.** The write decision lives on the client instance and is never
+persisted: stripped before any cache write (GATE-4), never read back from one, compared by
+recency across its two sources. A Ruby client outlives a request under any threaded or forking
+server, so `Client#reset_write_decision!` drops it at a request boundary. The framework wrapper
+(`langsys-ruby-rails`) wires that per request; this SDK cannot do it for its host.
+
+**REG-3, wrapper obligation.** `flush_on_shutdown` runs from `at_exit` when the client is built
+with `auto_flush: true`, and that path is best-effort: `at_exit` does not run on an OOM kill,
+`SIGKILL` or a hard timeout. The reliable path is `Client#flush_pending`, called by the host after
+its response; the lifecycle hook belongs to the framework wrapper.
+
+**Grant lane, affirmative non-participation.** No `X-Write-Grant` header is ever sent, asserted
+case-insensitively over the assembled header set. This is load-bearing for GATE-1: the server's
+gate is `type-allows-write OR valid-grant`, so the read-key short-circuit in
+`Client#write_enabled?` is sound only while no grant is sent. The test's failure message says
+what to remove if grant support lands.
+
+**GATE-8, the two meanings of absence.** `write_enabled` is absent either because a
+pre-capability server omitted it or because GATE-4 stripped it from a payload this SDK cached.
+The fallback applies to `read` and plain `write` keys only, where the server keeps
+`write_enabled` equal to the key type, and never to `ip_write`, which pays a live authorize
+because its decision is address-dependent.
+
+**CID-3, the JS code-unit shape is not tolerated.** Code-unit ids were minted by browser SDKs,
+and their tolerance lives in the browser core's own exports, which CID-3 says to call rather than
+reimplement. PHP's tolerance is pipe-only for the same reason.
 
 ## Gaps, ranked by cost
 
-Everything in the wave brief is closed. What remains needs infrastructure this repo does not
-own.
+1. **TOK-3 / TOK-4, page path.** Text outside block elements and a block host's own attributes
+   are not tokenized on the page path, so that content is never registered or translated there,
+   and page-path ids diverge from the TS fixture on seven rows. Correctness, common on real
+   pages. Held for the registration-shape ruling.
+2. **SRV-3, overlapping requests.** One request's post-response flush can register another
+   request's misses before that request has rendered, including misses from a render that later
+   fails. Correctness under concurrency. Held for the operator's ruling on the request-scope seam.
+3. **WIRE-4, a failing catalog fetch repeats per lookup.** No negative cache and no backoff on the
+   read side, so an unavailable or rejected locale costs one failing round trip per token, per
+   request. Availability under a failing dependency. Measured and routed; no MUST covers it yet.
+4. **CONF-2 contract fixture.** GATE-2, GATE-5, REG-8, REG-9, REG-10, WIRE-2 and CONF-1 rest on
+   stubs that cannot say no. Evidence quality, owned by the fleet fixture.
+5. **Strip ruling.** Four held rows. Identity for C0-bearing content, rare.
+6. **Request-boundary wiring.** `reset_write_decision!`, the post-response flush and, if built,
+   the scope hold need a host lifecycle hook. Other repo: `langsys-ruby-rails`.
 
-1. **CONF-1 residue** — `client_spec` and `html_spec` still assert on request bodies rather
-   than on what the server accepted. **Evidence quality**, not behaviour. Owned by the E2E
-   wave, where live-assertion infrastructure is the focus.
-2. **CONF-3** — mutation proofs are run every wave and reported, but they are not a committed
-   suite, so a reader has to take the numbers on trust. **Evidence durability.** Wants a
-   harness the fleet shares rather than one invented here.
-3. **Downstream-of-registration assertions** — the live `ip_write` example stops at the
-   server accepting the POST, because the local queue workers are deliberately down.
-   **Coverage depth**, E2E wave.
-4. **Request-boundary wiring** — `reset_write_decision!` and the REG-3 flush both need a host
-   lifecycle hook. **Other repo**: `langsys-ruby-rails`, framework-variant wave.
+## Provenance
 
-## Owed when spec 8.0.1 lands
+```
+git -C ../langsys2 rev-parse 5cff03a1                       # spec commit
+git -C ../langsys2 ls-tree 5cff03a1 docs/sdk-spec.mdx       # blob 5c5c0723…
+git -C ../langsys2 cat-file blob 5c5c0723 | grep -cE '^### [A-Z]+-[0-9]+ '   # 79
+bundle exec rake conformance:check                          # this file against that blob
+bundle exec rake conformance:green                          # fails while any row is not green
+```
 
-Agreed with the program, blocked on the new blob — Langsys sends it. Recorded here so the
-work is not rediscovered:
+The three vendored fixtures are asserted by blob in the suite, so a copy that drifts fails the
+build rather than the reader: `custom-id-reference.json` (langsys-php-sdk 8862841),
+`canonicalization-reference.json` (langsys-js-typescript 4eac870, blob 1ae7bc29),
+`parse-model-reference.json` (langsys-php-sdk 5400248, blob a3b0cf8c).
 
-- **Add `U+FEFF` to the collapse set.** Measured and reported during this lane as a live
-  JS-vs-`[[:space:]]` divergence, deliberately not adopted unilaterally; 8.0.1 settles it.
-- **Stop collapsing `U+0085` and `U+180E`.** `[[:space:]]` matches both and the converged
-  set does not, so this narrows the class rather than widening it — the one direction that
-  can change ids for content already registered.
-- **Page path stops skipping standalone `svg`.** The operator ruled SVG text translatable;
-  `math` joins the exclusions instead. This is the svg/math disagreement this file reports
-  as measured-not-changed, now decided — and it resolves the two paths in opposite
-  directions for the two elements, so both need doing together.
-- **SRV-4 flips to `n/a` structurally**, once the clarification confirming it is the
-  hydration hand-off lands. Held at `not implemented` until then, per its row.
-- **Re-row every claim against the new blob** and re-run the computed summary.
+`rbs -I sig validate` checks that the signatures in `sig/` are coherent; it does not check them
+against the implementation, and is not cited as evidence for any rule.
 
-## Limitations of this document
+## Limitations
 
-- Rows are claims about `feature/838_write_key_gating`, not about `main`.
-- Rules marked `not implemented` with basis "Not assessed" are honest gaps in *this exercise*, not verified absences. They are distinguished from rules proven absent by live probe, which cite one.
-- `spec/spec_helper.rb` also carries an environment fix from before the wave: WebMock's `allow_localhost` does not treat a Valet `.test` host as localhost, so the host from `LANGSYS_API_URL` is allowed explicitly. Without it no live example can run at all, and the failure presents as a credentials problem.
-- **Registration evidence stops at the HTTP layer by instruction.** The local queue workers are deliberately down, so a POST is accepted and enqueued but never processed. `ACCEPTED by server` in the GATE-1 row means exactly that — a 2xx on the registration call — and nothing about downstream processing. E2E is deferred to the program's E2E wave.
-- **On this SDK having no legacy id space:** the repo is one commit and the gem is unpublished (rubygems 404), so no third party has ever run `generate_custom_id`. That makes CID-3's atomicity requirement trivially satisfied rather than carefully sequenced. The limit of the claim: no *committed* Ruby form other than the pipe-join, and no publication — not proof that no Ruby-shaped id reached production by another route. Since the pipe-join is byte-identical to PHP's legacy variant, any such id is indistinguishable from a PHP-minted one and already covered by that lane's tolerate-list. **Subsumed by PHP's, not provably absent.**
+- Rows are claims about `feature/838_write_key_gating`, not `main`.
+- Live registration evidence stops at the server accepting the POST: the local queue workers are
+  deliberately down, so nothing downstream of acceptance is asserted.
+- `spec_helper` allows the `LANGSYS_API_URL` host past WebMock, because `allow_localhost` does not
+  count a Valet `.test` domain as localhost; without it the live suite fails in a way that looks
+  like a credentials problem.

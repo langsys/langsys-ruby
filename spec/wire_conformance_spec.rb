@@ -142,21 +142,27 @@ RSpec.describe "WIRE conformance" do
     it "sends a lowercase locale on the wire even when set with region casing" do
       client = build_client
       stub_authorize
-      req = stub_translations("es-es", { "UI" => { "Save" => "Guardar" } })
+      stub_translations("es-es", { "UI" => { "Save" => "Guardar" } })
       client.set_locale("es-ES")
-      client.t("Save", category: "UI")
-      expect(req).to have_been_requested
+      # The stub answers only the lowercase query, so the translation is obtainable only by a
+      # request the server would accept; an uppercase one is refused and t() degrades to source.
+      expect(client.t("Save", category: "UI")).to eq("Guardar")
     end
 
     it "resolves en-US and en-us to the same cache entry rather than fetching twice" do
       client = build_client
       stub_authorize
-      req = stub_translations("en-us", { "UI" => { "Save" => "Saved" } })
+      stub_request(:get, "https://api.test/api/translations")
+        .with(query: { "project_id" => "proj-1", "locale" => "en-us", "format" => "flat" })
+        .to_return(status: 200, body: JSON.generate(catalog_body({ "UI" => { "Save" => "Saved" } })),
+                   headers: { "Content-Type" => "application/json" })
+        .then.to_raise(Errno::ECONNREFUSED)
       client.set_locale("en-US")
-      client.t("Save", category: "UI")
+      expect(client.t("Save", category: "UI")).to eq("Saved")
       client.set_locale("en-us")
-      client.t("Save", category: "UI")
-      expect(req).to have_been_requested.once
+      # A second fetch is refused and would degrade t() to the source phrase, so the translation
+      # surviving the casing change shows both spellings share one cache entry.
+      expect(client.t("Save", category: "UI")).to eq("Saved")
     end
 
     it "keeps display casing intact in translated HTML output" do
@@ -172,12 +178,12 @@ RSpec.describe "WIRE conformance" do
   describe "WIRE-1 — authenticate with the X-Authorization header" do
     it "sends the raw key with no Bearer prefix" do
       client = build_client
-      req = stub_request(:get, /api\.test.*authorize-project/)
-            .with(headers: { "X-Authorization" => "test-key" })
-            .to_return(status: 200, body: JSON.generate(authorize_body),
-                       headers: { "Content-Type" => "application/json" })
-      client.project
-      expect(req).to have_been_requested
+      stub_request(:get, /api\.test.*authorize-project/)
+        .with(headers: { "X-Authorization" => "test-key" })
+        .to_return(status: 200, body: JSON.generate(authorize_body),
+                   headers: { "Content-Type" => "application/json" })
+      # Answered only for the raw key: a Bearer-prefixed request is refused and authorize raises.
+      expect(client.project.id).to eq("proj-1")
     end
   end
 
@@ -213,6 +219,20 @@ RSpec.describe "WIRE conformance" do
 
     it "would catch a grant header if one were ever sent (matcher control)" do
       expect(%w[X-Write-Grant x-WRITE-grant].select { |h| h.downcase.include?("write-grant") }.size).to eq(2)
+    end
+  end
+
+  describe "CACHE-1 — cache keys are namespaced by project" do
+    it "does not serve one project's catalog to another project sharing the cache backend" do
+      shared = Langsys::Cache::Memory.new
+      stub_translations("en-us", { "UI" => { "Save" => "Guardar" } })
+      stub_request(:get, "https://api.test/api/translations")
+        .with(query: { "project_id" => "proj-2", "locale" => "en-us", "format" => "flat" })
+        .to_return(status: 200, body: JSON.generate(catalog_body({ "UI" => { "Save" => "Salvar" } })),
+                   headers: { "Content-Type" => "application/json" })
+
+      expect(build_client(cache: shared).t("Save", category: "UI")).to eq("Guardar")
+      expect(build_client(project_id: "proj-2", cache: shared).t("Save", category: "UI")).to eq("Salvar")
     end
   end
 end

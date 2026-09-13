@@ -1,125 +1,45 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require_relative "support/conformance_checker"
 
-# CONFORMANCE.md's summary is a claim about its own rules table. Wave 2 shipped a summary
-# that reconciled with nothing in that table — miscounted, graded rules as implemented that
-# the table marked otherwise, and had no bucket for two of its statuses. A hand-maintained
-# tally of 60-odd rows drifts on the first edit and nothing notices, so it is computed here
-# and asserted: the document fails the build rather than the reader.
-#
-# Namespaced in a module rather than left as bare constants in the describe block. A
-# constant assigned inside a block binds on Object and will silently rebind a same-named
-# one in another spec file — an earlier draft of this file did exactly that to the CID
-# suite's fixture rows and broke three of its integrity assertions.
+# CONFORMANCE.md is checked by the same code `rake conformance:check` runs, so the build and
+# the rake task cannot disagree about what the file says, and the tally is computed from the
+# table rather than typed beside it. The previous version of this file parsed its own
+# older table shape and would have kept passing against a document the fleet checker
+# rejects.
 module ConformanceDoc
   PATH = File.expand_path("../CONFORMANCE.md", __dir__)
-  TEXT = File.read(PATH)
-  ALLOWED = ["implemented", "provisional", "provisional (no test)", "partial",
-             "not implemented", "n/a (architecture)", "waived"].freeze
-
-  # Spec v8 at blob b657b490f07615b889081c0ac5244ec4bd73bf81 carries 79 rules:
-  #   git -C ../langsys2 cat-file blob b657b490 | grep -cE '^### [A-Z]+-[0-9]+ '
-  # Hard-coded rather than derived: the spec lives in a sibling repo that is not
-  # guaranteed present at test time, and a count degrading to "however many I could find"
-  # is not a check. Lives here, not in the describe block, for the reason above.
-  SPEC_RULE_COUNT = 79
-
-  # The only profiles this SDK is NOT. A rule whose Profiles line names `server` or `all`
-  # binds here and can never be skipped on profile grounds — it is either implemented, or
-  # honestly not, or n/a on a stated mechanism.
-  NA_PROFILES = ["n/a (profile: browser)", "n/a (profile: binding)"].freeze
-
-  module_function
-
-  # A rules-table row: "| GATE-1 | implemented | live | … |". The id cell may hold a range
-  # ("BIND-1..6") or a list ("HINT-1, 3–12"), so it is expanded before counting.
-  def rows
-    TEXT.each_line.filter_map do |line|
-      next unless line =~ /^\| ([A-Z]+-[0-9][^|]*) \| ([^|]+) \|/
-
-      [Regexp.last_match(1).strip, Regexp.last_match(2).strip.delete("*")]
-    end
-  end
-
-  def expand(ids)
-    prefix = ids[/\A([A-Z]+)-/, 1]
-    ids.split(",").flat_map do |part|
-      case part.strip
-      when /\A([A-Z]+)-(\d+)\.\.(\d+)\z/
-        (Regexp.last_match(2).to_i..Regexp.last_match(3).to_i).map { |n| "#{Regexp.last_match(1)}-#{n}" }
-      when /\A(\d+)[\u2013-](\d+)\z/
-        (Regexp.last_match(1).to_i..Regexp.last_match(2).to_i).map { |n| "#{prefix}-#{n}" }
-      else
-        [part.strip]
-      end
-    end
-  end
-
-  def graded
-    rows.flat_map { |ids, status| expand(ids).map { |id| [id, status] } }
-  end
-
-  def tally
-    graded.each_with_object(Hash.new(0)) { |(_, status), h| h[status] += 1 }
-  end
-
-  def bucket(status)
-    return "n/a — profile" if status.start_with?("n/a (profile:")
-    return "n/a — architecture" if status == "n/a (architecture)"
-
-    status
-  end
+  SPEC_REPO = File.expand_path("../../langsys2", __dir__)
+  # Meta-rules discharged by the document and this checker rather than by runtime code.
+  META_RULES = %w[CONF-2 CONF-3].freeze
+  CLAIMS = %w[implemented provisional partial].freeze
 end
 
 RSpec.describe "CONFORMANCE.md" do
-  let(:graded) { ConformanceDoc.graded }
-  let(:tally) { ConformanceDoc.tally }
-  let(:text) { ConformanceDoc::TEXT }
-
-  it "grades every rule in the spec exactly once" do
-    ids = graded.map(&:first)
-    expect(ids.size).to eq(ConformanceDoc::SPEC_RULE_COUNT),
-                        "expected all #{ConformanceDoc::SPEC_RULE_COUNT} rules graded, found #{ids.size}"
-    expect(ids.tally.select { |_, n| n > 1 }).to be_empty
+  let(:result) do
+    Langsys::ConformanceChecker.run(ConformanceDoc::PATH, spec_repo: ConformanceDoc::SPEC_REPO, quiet: true)
   end
 
-  it "uses only the documented status vocabulary" do
-    unknown = tally.keys.reject { |s| ConformanceDoc::ALLOWED.include?(s) || ConformanceDoc::NA_PROFILES.include?(s) }
-    expect(unknown).to be_empty, "unrecognised status(es): #{unknown.inspect}"
+  it "passes the canonical-format check: header, profiles, all 79 ids exactly once, status and tier" do
+    expect(result.errors).to be_empty, result.errors.first(20).join("\n")
   end
 
-  it "only claims profile-n/a for a profile this SDK is not" do
-    # The previous check accepted any `n/a (profile: …)` string, which let SRV-4 and SRV-5
-    # be rowed `n/a (profile: browser)` against Profiles lines naming `server` first —
-    # a pass claimed for work that does not exist. This SDK is `server` + `all`, so
-    # `server` and `all` are never valid grounds for it to skip a rule.
-    offenders = tally.keys.select { |k| k.start_with?("n/a (profile:") } - ConformanceDoc::NA_PROFILES
-    expect(offenders).to be_empty,
-                         "profile-n/a must name browser or binding, got: #{offenders.inspect}"
+  it "names a re-appliable mutation on every row that claims runtime behaviour (CONF-3)" do
+    claims = result.rows.select { |r| ConformanceDoc::CLAIMS.include?(r.status) }
+    unproven = claims.reject { |r| ConformanceDoc::META_RULES.include?(r.id) || r.evidence.include?(" red (") }
+    expect(unproven.map(&:id)).to be_empty
   end
 
-  it "has a summary whose counts match the rules table" do
-    summary = text[/^## Summary\n(.*?)^## /m, 1].to_s
-    claimed = summary.each_line.filter_map do |line|
-      next unless line =~ /^\| ([^|]+) \| \*{0,2}(\d+)\*{0,2} \|/
-
-      [Regexp.last_match(1).strip.delete("*"), Regexp.last_match(2).to_i]
-    end.to_h
-    claimed.delete("total")
-
-    actual = tally.each_with_object(Hash.new(0)) { |(status, n), h| h[ConformanceDoc.bucket(status)] += n }
-    expect(claimed).to eq(actual)
+  it "gives every n/a row its reason" do
+    bare = result.rows.select { |r| r.status.start_with?("n/a") && r.evidence.strip.length < 12 }
+    expect(bare.map(&:id)).to be_empty
   end
 
-  it "reports a total equal to the number of graded rules" do
-    expect(text[/^\| \*\*total\*\* \| \*\*(\d+)\*\*/, 1].to_i).to eq(graded.size)
-  end
-
-  it "keeps the two kinds of n/a distinct" do
-    # A profile row goes stale only if a Profiles line moves; an architecture row can rot
-    # under you with no rule changing. One label would hide the one that rots silently.
-    expect(tally.keys).to include("n/a (architecture)")
-    expect(tally.keys.any? { |k| k.start_with?("n/a (profile:") }).to be(true)
+  it "fails the check when a row carries two ids (positive control)" do
+    broken = File.read(ConformanceDoc::PATH).sub(/^\| GATE-2 \|/, "| GATE-1 |")
+    errors = Langsys::ConformanceChecker.check(broken).errors
+    expect(errors).to include(a_string_matching(/GATE-1 appears more than once/))
+      .and include(a_string_matching(/GATE-2 is missing/))
   end
 end

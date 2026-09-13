@@ -177,16 +177,16 @@ RSpec.describe "GATE conformance" do
       expect(post).not_to have_been_requested
     end
 
-    it "does POST when the server says write_enabled is true on an ip_write key" do
+    it "registers when the server says write_enabled is true on an ip_write key" do
       client = build_client
       stub_authorize(key_type: "ip_write", write_enabled: true)
       stub_translations("en-us", { "UI" => {} })
-      post = stub_request(:post, "https://api.test/api/translatable-items")
-             .to_return(status: 200, body: JSON.generate({ "status" => true }),
-                        headers: { "Content-Type" => "application/json" })
+      stub_request(:post, "https://api.test/api/translatable-items")
+        .to_return(status: 200, body: JSON.generate({ "status" => true }),
+                   headers: { "Content-Type" => "application/json" })
       client.t("Save", category: "UI")
       client.flush_pending
-      expect(post).to have_been_requested
+      expect(client.registered?("UI", "Save")).to be(true)
     end
   end
 end

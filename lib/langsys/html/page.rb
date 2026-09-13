@@ -24,7 +24,7 @@ module Langsys
         details summary dialog
       ].to_set.freeze
 
-      SKIP_ELEMENTS = %w[script style noscript template svg math].to_set.freeze
+      SKIP_ELEMENTS = %w[script style noscript template math].to_set.freeze
       META_NAMES = %w[description keywords author].freeze
       OG_PROPERTIES = %w[og:title og:description og:site_name].freeze
       TWITTER_PROPERTIES = %w[twitter:title twitter:description].freeze
@@ -46,22 +46,9 @@ module Langsys
         nil
       end
 
-      # A copy of +element+ with any already-identified descendant host removed, so its
-      # text does not join the surrounding block's phrase array. Order matters to a
-      # block's id, so a host that another SDK owns must not silently shift it.
-      def self.without_marked_hosts(element)
-        copy = element.dup
-        copy.xpath(".//*").each do |descendant|
-          descendant.remove unless marker_attr(descendant, "phrase").nil?
-        end
-        copy
-      end
-
+      # True only for an authoring declaration. See Html.classify_block_attribute.
       def self.content_block_marked?(element)
-        value = marker_attr(element, "contentblock")
-        return false if value.nil?
-
-        value != "" && value != "0" && value.to_s.downcase != "false"
+        Html.classify_block_attribute(element) == :declaration
       end
 
       def self.translate(client, html, default_category = nil, selector_categories = nil)
@@ -100,7 +87,7 @@ module Langsys
         # Normalised, not stripped. A raw strip is ASCII-only, so a title padded with
         # U+00A0 produced a phrase no other SDK would ever mint — a token path that trims
         # without collapsing, which fixing the collapse alone does not reach (TOK-2).
-        title_text = title && Html.normalize_whitespace(title.text)
+        title_text = title && Html.canonical_token(title.text)
         if title_text && !title_text.empty?
           title.content = @client.translate(title_text, category: @default_category, locale: @locale)
         end
@@ -117,7 +104,7 @@ module Langsys
         # (`\s`, `strip`, `split`) cannot find a path that does none of them. TOK-2 says
         # find every site that turns a text node into a token; this is the case where
         # "every site" means the ones doing nothing at all.
-        content = Html.normalize_whitespace(meta["content"])
+        content = Html.canonical_token(meta["content"])
         return if content.empty?
 
         name = meta["name"] || ""
@@ -152,12 +139,20 @@ module Langsys
           next if SKIP_ELEMENTS.include?(tag)
           next if child["translate"] == "no" || Html.to_s_or_nil(child["data-notrans"])
           # MARK-2: already identified by another SDK's renderer — leave it whole.
-          next if phrase_marked?(child)
+          next if Html.phrase_marked?(child)
+          # A content-block host carrying another SDK's id: not tokenized, not queued, not
+          # re-stamped and not rewritten. One block, one id.
+          next if Html.classify_block_attribute(child) == :identity
 
           effective = effective_category(child, inherited)
 
           if content_block_attr?(child)
             handle_block(child, item_category(effective))
+          elsif tag == "svg"
+            # TOK-1 (8.0.1): a standalone svg's <text> is prose, handled as its own leaf.
+            # Not by adding svg to BLOCK_ELEMENTS: that retracted mechanism makes a paragraph
+            # holding an inline icon "contain a nested block", and it loses its own words.
+            translate_leaf(child, effective)
           elsif BLOCK_ELEMENTS.include?(tag)
             walk_block(child, effective)
           else
@@ -169,7 +164,12 @@ module Langsys
       def walk_block(child, effective)
         return walk(child, effective) if contains_nested_blocks?(child)
 
-        inner = Html.inner_html(Page.without_marked_hosts(child))
+        translate_leaf(child, effective)
+      end
+
+      # One leaf: a single phrase when its whole text is one token, otherwise a content block.
+      def translate_leaf(child, effective)
+        inner = Html.inner_html(child)
         phrases = Html.extract_phrases(inner, @attrs)
         return if phrases.empty?
 
@@ -189,10 +189,9 @@ module Langsys
       end
 
       def handle_block(element, item_cat)
-        # Same excision as the leaf path (MARK-2): a declared content-block host does not
-        # own a child another SDK has already identified. Without this the two paths met
-        # the rule differently, and the rule was satisfied on whichever one a test used.
-        inner = Html.inner_html(Page.without_marked_hosts(element))
+        # Marked phrase hosts are excised inside the tokenizer now, so the declared-host path
+        # and the leaf path get the same excision from the same place.
+        inner = Html.inner_html(element)
         phrases = Html.extract_phrases(inner, @attrs)
         return if phrases.empty?
 
@@ -243,7 +242,7 @@ module Langsys
       # rendered by another SDK and is already registered. Walking into it splits a block
       # that has an id and registers its text a second time.
       def phrase_marked?(element)
-        !Page.marker_attr(element, "phrase").nil?
+        Html.phrase_marked?(element)
       end
 
       def contains_nested_blocks?(element)

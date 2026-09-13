@@ -242,4 +242,18 @@ RSpec.describe "CID conformance" do
       expect(client.translate_content_block("<p>Welcome</p>", category: "Home")).to include("Bienvenido")
     end
   end
+
+  describe "CID-4 — the content check is what declines a colliding legacy match" do
+    it "declines a collision that shares a phrase with the current block, and queues the block" do
+      colliding = Digest::MD5.hexdigest(%w[Home Welcome].join("|"))
+      client = build_client
+      stub_authorize
+      stub_translations("es-es", { "Home" => { colliding => { "Welcome" => "Bienvenido", "Extra" => "Extra" } } })
+      client.set_locale("es-ES")
+
+      expect(client.translate_content_block("<p>Welcome</p>", category: "Home")).not_to include("Bienvenido")
+      expect(client.pending_content_blocks.map { |b| b["custom_id"] })
+        .to eq([Langsys.generate_custom_id("Home", %w[Welcome])])
+    end
+  end
 end

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "attributes"
+require_relative "canonical"
 
 module Langsys
   # Server-side HTML translation. A faithful port of the PHP/Python SDKs' HTML parser +
@@ -10,33 +11,6 @@ module Langsys
   # to use +translate_content_block+ / +translate_page+. Everything else in the SDK works
   # without it.
   module Html
-    # TOK-2/TOK-4: the whitespace class that decides identity.
-    #
-    # Ruby's +\s+ is ASCII-only — it matches neither U+00A0 nor U+2028/U+2029 — so the
-    # previous class left all three in the token and this SDK minted different ids from
-    # the JS family for content identical to every reader. +[[:space:]]+ is Unicode-aware
-    # and covers them. Measured, not assumed: see spec/tok_conformance_spec.rb.
-    #
-    # Known delta, deliberately not papered over: JavaScript's +\s+ also matches U+FEFF,
-    # which +[[:space:]]+ does not. No rule names it and no fixture row exercises it, so
-    # matching JS there would be this lane inventing a contract detail for four SDKs.
-    # Reported to the program instead.
-    WHITESPACE = /[[:space:]]+/
-
-    # TOK-1: never tokenized. Excluded BY ELEMENT NAME rather than by trusting the
-    # parser's node modelling — Nokogiri happens to give +script+ and +style+ children as
-    # CDATA, which the walker's +text?+ test rejects, so those two passed by accident and
-    # would start leaking the moment the parser changed underneath.
-    #
-    # +template+ is a genuine vector here, unlike in the JS family: parse5 hangs template
-    # content off a separate fragment so a walker emits nothing from it either way, but
-    # libxml2 puts it in the tree, so omitting it from this list would leak.
-    #
-    # +svg+ and +math+ are deliberately ABSENT. TOK-1 does not name them, and the page
-    # translator skips them while this path does not — a real disagreement between the two
-    # paths, reported to the program rather than settled here.
-    NON_TOKENIZED_ELEMENTS = %w[script style template noscript].freeze
-
     module_function
 
     # Require Nokogiri lazily with a helpful message (it's an optional dependency).
@@ -48,20 +22,6 @@ module Langsys
     rescue LoadError => e
       raise Langsys::ConfigurationError,
             "Langsys: HTML translation requires Nokogiri. Add `gem \"nokogiri\"` to your Gemfile. (#{e.message})"
-    end
-
-    def normalize_whitespace(text)
-      return "" if text.nil?
-
-      # Collapse first, THEN strip. Order is load-bearing: +String#strip+ is ASCII-only
-      # and removes none of U+00A0, U+2028 or U+2029, but the collapse has already turned
-      # any leading or trailing run of them into a single U+0020 by the time it runs.
-      text.gsub(WHITESPACE, " ").strip
-    end
-
-    # True when +name+ is an element whose subtree contributes no tokens (TOK-1).
-    def excluded_from_tokenizing?(name)
-      NON_TOKENIZED_ELEMENTS.include?(name.to_s.downcase)
     end
 
     def skip?(element)
@@ -92,11 +52,19 @@ module Langsys
           # TOK-1: the whole subtree, attributes included — a title on a <script> is no
           # more translatable than its body.
           next if excluded_from_tokenizing?(child.name)
+          # MARK-2: excised HERE, in the tokenizer, so every path gets it. It used to be
+          # done only by the page walker, so the block path folded another SDK's phrase
+          # host into the block id.
+          next if phrase_marked?(child)
+          # MARK-2, the content-block half: another SDK's resolved id, nested or not, is left
+          # whole. A declaration nested inside a fragment still folds into it; only an
+          # identity is excised.
+          next if classify_block_attribute(child) == :identity
 
           collect_element(child, attrs, out)
           walk_extract(child, attrs, out)
         elsif child.text?
-          text = normalize_whitespace(child.content)
+          text = canonical_token(child.content)
           out << text unless text.empty?
         end
       end
@@ -107,7 +75,7 @@ module Langsys
         value = element[attr]
         next unless value && !value.empty?
 
-        normalized = normalize_whitespace(value)
+        normalized = canonical_token(value)
         out << normalized unless normalized.empty?
       end
       button = button_value(element)
@@ -115,7 +83,7 @@ module Langsys
     end
 
     def button_value(element)
-      translatable_button?(element) ? normalize_whitespace(element["value"]) : nil
+      translatable_button?(element) ? canonical_token(element["value"]) : nil
     end
 
     # A <button value>, or an <input type=submit|button value> — its value is translatable.
@@ -145,6 +113,12 @@ module Langsys
       node.children.each do |child|
         if child.element?
           next if skip?(child)
+          # The apply path skips exactly what the extract path skips (CONF-1: extract vs
+          # apply). A subtree the tokenizer refused to tokenize is one we refuse to rewrite,
+          # or a sibling token that happens to read the same gets written into it.
+          next if excluded_from_tokenizing?(child.name)
+          next if phrase_marked?(child)
+          next if classify_block_attribute(child) == :identity
 
           apply_attributes(child, translations, attrs)
           walk_apply(child, translations, attrs)
@@ -157,12 +131,18 @@ module Langsys
     end
 
     def apply_attributes(element, translations, attrs)
+      # Looked up by the CANONICAL token, the same form collection registered. The raw
+      # value used to be the key, so an attribute registered collapsed was never found.
       attrs.each do |attr|
         value = element[attr]
-        element[attr] = translations[value] if value && present_translation(translations[value])
+        next if value.nil?
+
+        key = canonical_token(value)
+        element[attr] = translations[key] if present_translation(translations[key])
       end
       raw = button_value_raw(element)
-      element["value"] = translations[raw] if raw && present_translation(translations[raw])
+      key = raw && canonical_token(raw)
+      element["value"] = translations[key] if key && present_translation(translations[key])
     end
 
     def button_value_raw(element)
@@ -172,17 +152,16 @@ module Langsys
     def translate_text(text, translations)
       return text if text.nil? || text.empty?
 
-      normalized = normalize_whitespace(text)
+      normalized = canonical_token(text)
       return text if normalized.empty? || !translations.key?(normalized)
 
       translated = translations[normalized]
       return text if !present_translation(translated) || translated == normalized
 
-      # Unicode-aware for the same reason as the collapse: a node whose leading character
-      # is U+00A0 has that character normalised out of its token, so ASCII \s here would
-      # decide the translation needs no leading space and silently reflow the text.
-      lead = text.match?(/\A[[:space:]]/) ? " " : ""
-      trail = text.match?(/[[:space:]]\z/) ? " " : ""
+      # The same set as the collapse: a node led by a member has it normalised out of the
+      # token, so a narrower test here would drop the leading space and reflow the text.
+      lead = whitespace_char?(text[0]) ? " " : ""
+      trail = whitespace_char?(text[-1]) ? " " : ""
       "#{lead}#{translated}#{trail}"
     end
 
@@ -205,7 +184,7 @@ module Langsys
 
     # Normalized text content of an element (all descendant text, whitespace-collapsed).
     def text_content(element)
-      normalize_whitespace(element.text)
+      canonical_token(element.text)
     end
 
     # Parse an HTML fragment; its children are the top-level nodes.

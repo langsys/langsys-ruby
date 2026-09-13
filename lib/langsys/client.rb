@@ -230,8 +230,14 @@ module Langsys
     private
 
     # Interpolation shares the client's logger so ICU-4 recovery notices surface.
+    #
+    # No params is not a reason to skip the renderer. A source phrase that asks for no
+    # arguments can have a translation that selects on one ("Welcome" -> a gender select);
+    # skipping here served the raw ICU source to the visitor, and neither ICU-1 recovery nor
+    # the ICU-4 notice ever ran. Only a template with no ICU syntax is returned untouched, so
+    # a plain phrase stays byte-identical instead of passing through slot substitution.
     def interpolate(text, params, loc)
-      return text unless params && !params.empty?
+      return text if (params.nil? || params.empty?) && !Interpolate.icu?(text)
 
       Interpolate.call(text, params, loc, logger: @logger)
     end

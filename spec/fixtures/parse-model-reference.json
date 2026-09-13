@@ -1,0 +1,191 @@
+{
+  "": "Parse-model agreement between libxml2 (this SDK) and the JS family.",
+  "purpose": "A tokenized phrase's key IS its encoded string, so any disagreement about how the DOM is BUILT changes the key before canonicalisation is even reached. Canonicalisation cannot close these; only the parser can.",
+  "js_family_source": "langsys-js-server @ 8105faa, real Chromium 153 measured against parse5 over these same families: 9 of 9 agreed, so these are the JS-FAMILY answer rather than one engine's.",
+  "measured_at": "2026-09-12",
+  "measured_by": "langsys-php-sdk on PHP 8.3.19 with libxml2 2.9.13 (LIBXML_DOTTED_VERSION), via DOMDocument::loadHTML with LIBXML_HTML_NOIMPLIED|LIBXML_HTML_NODEFDTD. The test wraps each fragment in a <div> to give the tokenizer a root; the real translatePage route (PageTranslator::parseDocument) reproduces every value identically, verified both ways. Every libxml2 column in this file is scoped to that version.",
+  "agreement": "3 of 7 ON LIBXML2 2.9.13 - implied close agrees 3/3; raw text 0/2 and foster parenting 0/2 diverge. VERSION-BOUND, not a property of libxml2: the Reviewer measured lxml on libxml2 2.14.6 giving the JS-family tokens on all seven inputs, and Nokogiri on libxml2 2.13.9 behaving like 2.9.13. The boundary lies between 2.13.9 and 2.14.6; no cause is stated because none was measured. PHP takes libxml2 from the PHP build, which composer cannot pin, so these ids move when a host's libxml2 crosses that line.",
+  "cases": [
+    {
+      "id": "raw-text-textarea",
+      "family": "raw text",
+      "html": "<p>Keep</p><textarea>a <b>b</b></textarea>",
+      "js_family": "{m0o}Keep{m0c}{m1o}a <b>b</b>{m1c}",
+      "libxml2": "{m0o}Keep{m0c}{m1o}a {m2o}b{m2c}{m1c}",
+      "agrees": false,
+      "why": "Chromium and parse5 make a <textarea> body RAW TEXT, so <b> is literal characters. libxml2 parses it as markup, so <b> becomes an element and takes a slot.",
+      "libxml2_tree": "<p>Keep</p><textarea>a <b>b</b></textarea>",
+      "content_block": {
+        "libxml2_tokens": [
+          "Keep",
+          "a",
+          "b"
+        ],
+        "js_family_tokens": [
+          "Keep",
+          "a <b>b</b>"
+        ],
+        "libxml2_block_id": "43ddeea82d4a0e2fc85c5f78215caf7f",
+        "js_family_block_id": "526f61b19c29148767952483d9f5538b",
+        "splits_block_id": true,
+        "note": "ARITY split: 3 tokens against 2. Per CID-1 an arity change re-keys EVERY block containing one.",
+        "js_family_block_id_uncategorized": "3c769823488c284be1acbe2c6ff13425"
+      }
+    },
+    {
+      "id": "raw-text-title",
+      "family": "raw text",
+      "html": "<title>a <b>b</b></title><p>Keep</p>",
+      "js_family": "{m0o}a <b>b</b>{m0c}{m1o}Keep{m1c}",
+      "libxml2": "{m0o}a {m1o}b{m1c}{m0c}{m2o}Keep{m2c}",
+      "agrees": false,
+      "why": "Same as textarea, and it also shifts every later slot index: the <p> is slot 1 in the JS family and slot 2 here.",
+      "libxml2_tree": "<title>a <b>b</b></title><p>Keep</p>",
+      "content_block": {
+        "libxml2_tokens": [
+          "a",
+          "b",
+          "Keep"
+        ],
+        "js_family_tokens": [
+          "a <b>b</b>",
+          "Keep"
+        ],
+        "libxml2_block_id": "d55c2b5c806bde213b0637da096c6b36",
+        "js_family_block_id": "196856a6c25d7713fbb976c1a1ab0ff5",
+        "splits_block_id": true,
+        "note": "Same arity split, 3 tokens against 2. The libxml2 side is measured here; the JS-family side is the TS lane's derivation. An earlier revision said 'measured on both sides here', which was false - only one side was ever measured in this repo.",
+        "js_family_block_id_uncategorized": "e14ee6dea1269d7531691a6b8bbf94c0"
+      }
+    },
+    {
+      "id": "foster-stray-element",
+      "family": "foster parenting",
+      "html": "<table><b>stray</b><tr><td>cell</td></tr></table>",
+      "js_family": "{m0o}stray{m0c}{m1o}{m2o}{m3o}{m4o}cell{m4c}{m3c}{m2c}{m1c}",
+      "libxml2": "{m0o}{m1o}stray{m1c}{m2o}{m3o}cell{m3c}{m2c}{m0c}",
+      "agrees": false,
+      "why": "Chromium and parse5 FOSTER-PARENT the stray <b> OUT of the table, so it becomes a sibling BEFORE it. libxml2 leaves it inside. They also insert a <tbody> that libxml2 does not, which adds a further slot level.",
+      "libxml2_tree": "<table><b>stray</b><tr><td>cell</td></tr></table>",
+      "content_block": {
+        "libxml2_tokens": [
+          "stray",
+          "cell"
+        ],
+        "js_family_tokens": [
+          "stray",
+          "cell"
+        ],
+        "libxml2_block_id": "c9a556e320152d0bd3fc239bbb2b6d40",
+        "js_family_block_id": "c9a556e320152d0bd3fc239bbb2b6d40",
+        "splits_block_id": false,
+        "note": "IDENTICAL. Hoisting the stray element out of the table does not change document ORDER, and the token array encodes order without nesting - so the content-block id survives what splits the phrase key.",
+        "js_family_block_id_uncategorized": "b67f0bc9259c1341bcca9555db386076"
+      }
+    },
+    {
+      "id": "foster-loose-text",
+      "family": "foster parenting",
+      "html": "<table>loose text<tr><td>x</td></tr></table>",
+      "js_family": "loose text{m0o}{m1o}{m2o}{m3o}x{m3c}{m2c}{m1c}{m0c}",
+      "libxml2": "{m0o}loose text{m1o}{m2o}x{m2c}{m1c}{m0c}",
+      "agrees": false,
+      "why": "The JS family moves the loose text out of the table entirely, so it leads the phrase with no slot around it. libxml2 keeps it inside the table's slot.",
+      "libxml2_tree": "<table>loose text<tr><td>x</td></tr></table>",
+      "content_block": {
+        "libxml2_tokens": [
+          "loose text",
+          "x"
+        ],
+        "js_family_tokens": [
+          "loose text",
+          "x"
+        ],
+        "libxml2_block_id": "0a1f1ae92500780beac5287122a3d74c",
+        "js_family_block_id": "0a1f1ae92500780beac5287122a3d74c",
+        "splits_block_id": false,
+        "note": "Identical, same reason.",
+        "js_family_block_id_uncategorized": "33abefba9fb4b8e1a71d3a32504fc0b9"
+      }
+    },
+    {
+      "id": "implied-close-p",
+      "family": "implied close",
+      "html": "<p>one<p>two",
+      "js_family": "{m0o}one{m0c}{m1o}two{m1c}",
+      "libxml2": "{m0o}one{m0c}{m1o}two{m1c}",
+      "agrees": true,
+      "why": "An unclosed <p> is closed by the next one in every model measured.",
+      "libxml2_tree": "<p>one</p><p>two</p>",
+      "content_block": {
+        "libxml2_tokens": [
+          "one",
+          "two"
+        ],
+        "js_family_tokens": [
+          "one",
+          "two"
+        ],
+        "libxml2_block_id": "499d5997c918fd2997c9baea33d52dc6",
+        "js_family_block_id": "499d5997c918fd2997c9baea33d52dc6",
+        "splits_block_id": false,
+        "note": "The trees agree, so both identity paths agree.",
+        "js_family_block_id_uncategorized": "1deb8726d4be44aa71943d7546a457a0"
+      }
+    },
+    {
+      "id": "implied-close-li",
+      "family": "implied close",
+      "html": "<ul><li>one<li>two</ul>",
+      "js_family": "{m0o}{m1o}one{m1c}{m2o}two{m2c}{m0c}",
+      "libxml2": "{m0o}{m1o}one{m1c}{m2o}two{m2c}{m0c}",
+      "agrees": true,
+      "why": "Bare <li> closes the previous one, identically.",
+      "libxml2_tree": "<ul><li>one</li><li>two</li></ul>",
+      "content_block": {
+        "libxml2_tokens": [
+          "one",
+          "two"
+        ],
+        "js_family_tokens": [
+          "one",
+          "two"
+        ],
+        "libxml2_block_id": "499d5997c918fd2997c9baea33d52dc6",
+        "js_family_block_id": "499d5997c918fd2997c9baea33d52dc6",
+        "splits_block_id": false,
+        "note": "The trees agree, so both identity paths agree.",
+        "js_family_block_id_uncategorized": "1deb8726d4be44aa71943d7546a457a0"
+      }
+    },
+    {
+      "id": "implied-close-option",
+      "family": "implied close",
+      "html": "<select><option>one<option>two</select>",
+      "js_family": "{m0o}{m1o}one{m1c}{m2o}two{m2c}{m0c}",
+      "libxml2": "{m0o}{m1o}one{m1c}{m2o}two{m2c}{m0c}",
+      "agrees": true,
+      "why": "Bare <option> likewise.",
+      "libxml2_tree": "<select><option>one</option><option>two</option></select>",
+      "content_block": {
+        "libxml2_tokens": [
+          "one",
+          "two"
+        ],
+        "js_family_tokens": [
+          "one",
+          "two"
+        ],
+        "libxml2_block_id": "499d5997c918fd2997c9baea33d52dc6",
+        "js_family_block_id": "499d5997c918fd2997c9baea33d52dc6",
+        "splits_block_id": false,
+        "note": "The trees agree, so both identity paths agree.",
+        "js_family_block_id_uncategorized": "1deb8726d4be44aa71943d7546a457a0"
+      }
+    }
+  ],
+  "two_identity_paths": "A tokenized <Phrase> key is a MARKER STRING, so it encodes nesting and is sensitive to any tree difference. A content block's custom_id is a flat ORDERED TOKEN ARRAY, so it survives a tree difference that preserves document order. Measured consequence: foster parenting splits the phrase key ONLY, while a raw-text body carrying markup splits BOTH - and the block half is an ARITY change, which per CID-1 re-keys every block containing one. The raw-text family is therefore the more damaging of the two, which is the opposite of this file's first reading.",
+  "provenance": "libxml2 columns are MEASURED in this repo, on libxml2 2.9.13 only (see libxml2_version). JS-family PHRASE keys (the encoded strings) are MEASURED: langsys-js-server @ 8105faa, real Chromium 153 against parse5, 9/9, and re-run by the Reviewer against the JS Server's own encodePhrase(). JS-family TOKEN ARRAYS are MEASURED on parse5 7.3.0, by the Reviewer, through langsys-js-server's own tokenizeHtml() (parseFragment, scripting enabled - the path blockId() uses), with src/tokenizer.ts byte-identical to 8105faa and the run repeated on js-server HEAD 93bc0b5: all seven rows matched js_family_tokens and js_family_block_id, with tokenizer-reference.json cases 2/4/9/12/14 as the control. NOT Chromium: for token arrays the Chromium half remains unmeasured, and Chromium evidence here is the phrase keys only. An earlier revision said the token arrays were NOT measured; that was correct when written, since nobody had measured them yet. Separately, and still true: the TS lane's test DOM (happy-dom) builds a raw-text body the libxml2 way, so TS's own tests cannot see the raw-text split this file records.",
+  "block_id_category": "UI. Every *_block_id in this file is HtmlParser::generateCustomId('UI', tokens). The category is PART OF THE HASH, so the ids are not reproducible without it - under the SDK's default '__uncategorized__' the same tokens give different values (e.g. foster-stray-element becomes b67f0bc9259c1341bcca9555db386076). Stated because an id a reader cannot recompute from this file is not evidence.",
+  "libxml2_version": "2.9.13"
+}

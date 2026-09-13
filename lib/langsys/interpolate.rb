@@ -31,7 +31,8 @@ module Langsys
     # ordinary prose is full of percent signs, and a greedy rule turns "50%off20%" into a
     # slot. An unmatched `%name%` is therefore left exactly as authored rather than
     # rewritten into a gap marker — visible either way, and it cannot corrupt real text.
-    PERCENT_SLOT = /%([A-Za-z_][A-Za-z0-9_.-]*)%/
+    # Identifier keys only, matching the JS core's adoptPercentPlaceholders exactly.
+    PERCENT_SLOT = /%([A-Za-z_][A-Za-z0-9_]*)%/
     # Argument kinds that carry branches, and so can recover to `other` (ICU-1).
     SELECTORS = %w[select plural selectordinal].freeze
 

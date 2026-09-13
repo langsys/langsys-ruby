@@ -141,4 +141,50 @@ RSpec.describe "ICU conformance" do
       expect(notices.size).to eq(2)
     end
   end
+
+  # Through t(), not Interpolate.call. Every example above calls the renderer directly, so
+  # none could see Client#interpolate skip it when the caller passed no params, which is the
+  # spec's own motivating case: "Welcome" asks for nothing and its translation selects.
+  describe "ICU-1/ICU-3/ICU-4 through t() when the caller passes no params" do
+    let(:notices) { [] }
+    let(:logger) do
+      double("logger").tap do |l|
+        allow(l).to receive(:debug) { |m| notices << m }
+        allow(l).to receive_messages(warn: nil, info: nil, error: nil)
+      end
+    end
+    let(:catalog) do
+      { "UI" => { "Welcome" => "{gender, select, female {Bienvenida} other {Bienvenido}}",
+                  "Items" => "Tienes {n, plural, one {# elemento} other {# elementos}}.",
+                  "Greeting" => "Hola { name }" } }
+    end
+
+    before do
+      Langsys::Interpolate::RECOVERY_NOTICES_SEEN.clear
+      stub_translations("es-es", catalog)
+    end
+
+    def spanish_client(**opts) = build_client(base_locale: "es-ES", **opts)
+
+    it "renders the other branch of a select when params is omitted" do
+      expect(spanish_client.t("Welcome", category: "UI")).to eq("Bienvenido")
+    end
+
+    it "renders the other branch of a select when params is empty" do
+      expect(spanish_client.t("Welcome", category: "UI", params: {})).to eq("Bienvenido")
+    end
+
+    it "recovers a plural with no params, `#` becoming the argument name" do
+      expect(spanish_client.t("Items", category: "UI")).to eq("Tienes {n} elementos.")
+    end
+
+    it "surfaces the ICU-4 notice on that path" do
+      spanish_client(logger: logger).t("Welcome", category: "UI")
+      expect(notices.join).to include("{gender}").and match(/es-es/i)
+    end
+
+    it "leaves a template with no ICU syntax byte-identical when no params are passed (control)" do
+      expect(spanish_client.t("Greeting", category: "UI")).to eq("Hola { name }")
+    end
+  end
 end

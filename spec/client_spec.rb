@@ -46,14 +46,17 @@ RSpec.describe Langsys::Client do
     it "registers queued phrases on a write key" do
       stub_translations("en-us", { "UI" => {} })
       stub_authorize(key_type: "write")
-      post = stub_request(:post, "https://api.test/api/translatable-items")
-             .to_return(status: 200, body: JSON.generate({ "status" => true, "data" => [] }),
-                        headers: { "Content-Type" => "application/json" })
+      stub_request(:post, "https://api.test/api/translatable-items")
+        .to_return(status: 200, body: JSON.generate({ "status" => true, "data" => [] }),
+                   headers: { "Content-Type" => "application/json" })
       client = build_client
       client.t("Save", category: "UI")
       result = client.flush_pending
       expect(result["phrases"]).to eq(1)
-      expect(post).to have_been_made
+      # Asserted on what the server accepted (CONF-1): the marker is written only after the
+      # response comes back, never on the attempt.
+      expect(client.registered?("UI", "Save")).to be(true)
+      expect(client.has_pending?).to be(false)
     end
   end
 
@@ -63,13 +66,15 @@ RSpec.describe Langsys::Client do
       expect { build_client.register_phrases(["Save"]) }.to raise_error(Langsys::AuthorizationError)
     end
 
-    it "posts items on a write key" do
+    it "registers items on a write key and returns the server's acceptance" do
       stub_authorize(key_type: "write")
-      post = stub_request(:post, "https://api.test/api/translatable-items")
-             .to_return(status: 200, body: JSON.generate({ "status" => true, "data" => [] }),
-                        headers: { "Content-Type" => "application/json" })
-      build_client.register_phrases([{ phrase: "Save", category: "UI" }])
-      expect(post).to have_been_made
+      stub_request(:post, "https://api.test/api/translatable-items")
+        .to_return(status: 200, body: JSON.generate({ "status" => true, "data" => [] }),
+                   headers: { "Content-Type" => "application/json" })
+      responses = build_client.register_phrases([{ phrase: "Save", category: "UI" }])
+      # The server's answer, not the call that produced it (CONF-1).
+      expect(responses).not_to be_empty
+      expect(responses).to all(include("status" => true))
     end
   end
 
