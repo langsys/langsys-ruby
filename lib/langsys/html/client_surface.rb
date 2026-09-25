@@ -76,6 +76,14 @@ module Langsys
                                       accept_language: accept_language)
       end
 
+      # SNAP-1: the catalog GET /translations/data serves for +locale+, uncached and unfiltered.
+      def catalog_data(locale)
+        @http.get("translations/data", { "project_id" => @config.project_id,
+                                         "locale" => Locale.normalize_locale(locale) })["data"]
+      end
+
+      def project_id = @config.project_id
+
       # The project's base locale from authorization, or nil when it cannot be read.
       def project_base_locale
         authorize_quietly&.base_locale

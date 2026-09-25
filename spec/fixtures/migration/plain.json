@@ -1,0 +1,1 @@
+{ "nav": { "home": "Home page", "cars": "car | cars", "moustache": "Hi {{name}}", "laravel": "Hello :name", "shout": "Hello :Name" } }

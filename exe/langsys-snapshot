@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# SNAP-1: export a catalog snapshot, filtered by category, from GET /translations/data.
+#
+#   langsys-snapshot --locale es-es [--locale fr-fr] --category UI [--category Errors] --out snapshot.json
+#
+# Reads LANGSYS_API_KEY, LANGSYS_PROJECT_ID and LANGSYS_API_URL. A snapshot is a cache: refresh it
+# by exporting again, never by editing it.
+require "optparse"
+require "langsys"
+
+locales = []
+categories = []
+out = nil
+OptionParser.new do |o|
+  o.on("--locale LOCALE") { |v| locales << v }
+  o.on("--category CATEGORY") { |v| categories << v }
+  o.on("--out PATH") { |v| out = v }
+end.parse!
+abort "usage: langsys-snapshot --locale L --category C --out PATH" if locales.empty? || categories.empty? || out.nil?
+
+client = Langsys::Client.new(cache: Langsys::Cache::Null.new)
+Langsys::Snapshot.export(client, locales: locales, categories: categories).write(out)
+puts "wrote #{out}"

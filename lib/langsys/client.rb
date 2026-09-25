@@ -17,6 +17,7 @@ require_relative "ellipsis"
 require_relative "controls"
 require_relative "messages"
 require_relative "client_messages"
+require_relative "migration"
 require_relative "registration_lane"
 require_relative "utilities"
 require_relative "html/parser"
@@ -38,7 +39,8 @@ module Langsys
 
     def initialize(api_key: nil, project_id: nil, api_url: nil, base_locale: nil, locale: nil,
                    locale_source: nil, cache: nil, cache_ttl: nil, timeout: nil,
-                   auto_flush: false, logger: nil, clock: nil, messages_category: nil)
+                   auto_flush: false, logger: nil, clock: nil, messages_category: nil,
+                   migration: nil, migration_locale: nil)
       @config = Config.resolve(
         api_key: api_key, project_id: project_id, api_url: api_url,
         base_locale: base_locale, cache_ttl: cache_ttl, timeout: timeout
@@ -48,6 +50,7 @@ module Langsys
       @messages_category = [messages_category, ENV.fetch("LANGSYS_MESSAGES_CATEGORY", nil)]
                            .find { |v| v && !v.empty? } || Messages::DEFAULT_CATEGORY
       @message_warnings = Set.new
+      @migration = build_migration(migration, migration_locale, base_locale)
       @http = Http.new(@config.api_url, @config.api_key, timeout: @config.timeout)
       @cache = cache || Cache::File.new
       @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl, logger: @logger,
@@ -174,6 +177,29 @@ module Langsys
     # interpolate +params+ with locale-aware CLDR formatting.
     def translate(phrase, category: nil, params: nil, locale: nil, content_block_id: nil)
       phrase = Controls.strip(phrase)
+      # MIG-2/MIG-5: in the migration mode the argument is a key first. A hit's converted source
+      # value is the phrase and its namespace the category, unless the call passes one.
+      if @migration && content_block_id.nil? && (hit = @migration.lookup(phrase))
+        phrase = hit.phrase
+        category ||= hit.category
+      end
+      render_phrase(phrase, category, params, locale, content_block_id)
+    end
+    alias t translate
+
+    # MIG-2 for a framework bridge: a key resolves as t() resolves it; a literal miss is converted
+    # under the syntax of the entry point that received it (+:rails+ for I18n.t), so a legacy
+    # call and a new-style call for one sentence register one phrase.
+    def translate_legacy(arg, entry_point:, category: nil, params: nil, locale: nil)
+      arg = Controls.strip(arg)
+      hit = @migration&.lookup(arg)
+      phrase = hit ? hit.phrase : Migration.convert_literal(arg, entry_point: entry_point, params: params)
+      render_phrase(phrase, category || hit&.category, params, locale, nil)
+    end
+
+    attr_reader :migration
+
+    def render_phrase(phrase, category, params, locale, content_block_id)
       loc = effective_locale(locale)
       catalog = @catalog.get(loc)
 
@@ -186,7 +212,7 @@ module Langsys
       queue_missing(phrase, category, catalog) if result.missing && content_block_id.nil?
       interpolate(result.text, params, loc)
     end
-    alias t translate
+    private :render_phrase
 
     # -- reference data (utilities) ------------------------------------------
 
@@ -238,6 +264,15 @@ module Langsys
     end
 
     private
+
+    # MIG-1: the legacy-key mode runs only when configured with source files. Unset, no file is
+    # read and no argument is ever treated as a key.
+    def build_migration(files, source_locale, base_locale)
+      return nil if files.nil? || Array(files).empty?
+
+      locale = source_locale || (base_locale || ENV.fetch("LANGSYS_BASE_LOCALE", nil) || "en").to_s.split(/[-_]/).first
+      Migration.new(files, logger: @logger, source_locale: locale)
+    end
 
     # Interpolation shares the client's logger so ICU-4 recovery notices surface.
     #

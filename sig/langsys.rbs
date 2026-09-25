@@ -198,6 +198,10 @@ module Langsys
     def lookup_phrase: (String, ?category: String?, ?params: Hash[untyped, untyped]?, ?locale: String?, ?record: bool) -> String
     def catalog_block: (String?, String, ?locale: String?) -> Hash[String, untyped]?
     def project_base_locale: () -> String?
+    def catalog_data: (String) -> untyped
+    def project_id: () -> String
+    def translate_legacy: (String, entry_point: Symbol | String, ?category: String?, ?params: Hash[untyped, untyped]?, ?locale: String?) -> String
+    attr_reader migration: Migration?
     attr_reader messages_category: String
     def render_message: (Hash[untyped, untyped], ?locale: String?) -> String
     def emit_message: (code: String, template: String, ?params: Hash[untyped, untyped]?, ?field: String?) -> Hash[String, untyped]
@@ -340,6 +344,50 @@ module Langsys
       def self.run: (sources: Array[Source], ?client: Client?, ?register: bool, ?out: untyped) -> Integer
       def self.register_new: (Client, Array[String], untyped) -> void
     end
+  end
+
+  class Migration
+    SUPPORTED: Array[String]
+    PLURAL_KEYS: Array[String]
+    CATEGORY_ORDER: Array[String]
+    PLACEHOLDERS: Array[[Regexp, String]]
+    UNCONVERTIBLE: Regexp
+    class Hit < Struct[untyped]
+      attr_accessor phrase: String
+      attr_accessor category: String?
+      attr_accessor file: String
+      attr_accessor key: String
+    end
+    class Result < Struct[untyped]
+      attr_accessor phrase: String
+      attr_accessor warning: String?
+    end
+    attr_reader duplicates: Array[String]
+    attr_reader problems: Array[Hash[Symbol, untyped]]
+    def initialize: (untyped, ?source_locale: String, ?logger: untyped) -> void
+    def lookup: (String) -> Hit?
+    def self.convert: (String, ?format: String) -> Result
+    def self.placeholders: (String) -> String
+    def self.convert_literal: (String, entry_point: Symbol | String, ?params: Hash[untyped, untyped]?) -> String
+    def self.rails_plural: (Hash[untyped, untyped]) -> String
+    def self.gettext_plural: (String, String) -> String
+    def self.icu_plural: (Hash[String, String]) -> String
+  end
+
+  class Snapshot
+    FORMAT: String
+    VERSION: Integer
+    attr_reader project_id: String
+    attr_reader generated_at: String
+    attr_reader locales: Hash[String, untyped]
+    def self.export: (Client, locales: Array[String], categories: Array[String]) -> Snapshot
+    def self.build: (String, Hash[String, untyped], ?generated_at: String) -> Snapshot
+    def self.load: (String) -> Snapshot
+    def initialize: (project_id: String, locales: Hash[String, untyped], generated_at: String) -> void
+    def catalog: (String) -> untyped
+    def checksum: () -> String
+    def to_h: () -> Hash[String, untyped]
+    def write: (String) -> String
   end
 
   module Controls

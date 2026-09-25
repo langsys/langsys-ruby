@@ -1,0 +1,15 @@
+en:
+  checkout:
+    submit: "Place order"
+    greeting: "Hello %{name}"
+    percent: "100%% sure"
+    price: "Total %<amount>.2f"
+  cart:
+    items:
+      zero: "Your cart is empty"
+      one: "%{count} item"
+      other: "%{count} items"
+  shared: "From the first file"
+es:
+  checkout:
+    submit: "Realizar pedido"

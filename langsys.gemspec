@@ -28,7 +28,7 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "exe/*", "sig/**/*.rbs", "README.md", "LICENSE", "CHANGELOG.md"]
   spec.require_paths = ["lib"]
   spec.bindir = "exe"
-  spec.executables = %w[langsys-messages]
+  spec.executables = %w[langsys-messages langsys-snapshot]
 
   # CLDR plural rules + locale-aware number/date formatting (pure Ruby, no native extension).
   spec.add_dependency "twitter_cldr", "~> 6.0"

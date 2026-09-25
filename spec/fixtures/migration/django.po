@@ -1,0 +1,21 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Hello %(name)s"
+msgstr "Hola %(name)s"
+
+msgctxt "cart"
+msgid "Remove"
+msgstr "Quitar"
+
+msgid "%(count)s item"
+msgid_plural "%(count)s items"
+msgstr[0] "%(count)s artículo"
+msgstr[1] "%(count)s artículos"
+
+msgctxt "nav"
+msgid ""
+"Wrapped "
+"message"
+msgstr ""
