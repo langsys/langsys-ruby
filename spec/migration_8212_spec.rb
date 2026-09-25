@@ -142,6 +142,14 @@ RSpec.describe "spec 8.2.12 legacy-key migration (MIG)" do
       expect(log.string).to match(/DEBUG.*checkout\.typo/)
     end
 
+    it "answers key? without logging, and without registering anything" do
+      sdk = client([File.join(dir, "en.yml")])
+      expect(sdk.migration.key?("checkout.submit")).to be(true)
+      expect(sdk.migration.key?("activemodel.errors.models.user.attributes.email.blank")).to be(false)
+      expect(log.string).not_to match(/is not a key/)
+      expect(sdk.has_pending?).to be(false)
+    end
+
     it "registers a changed value as a new phrase" do
       Dir.mktmpdir do |tmp|
         path = File.join(tmp, "en.yml")

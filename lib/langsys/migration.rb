@@ -33,6 +33,13 @@ module Langsys
       @problems = []
     end
 
+    # Whether +arg+ is a key in the files. Quiet: a bridge asks this for every lookup its host
+    # makes, most of which are never registered, so a miss here is not MIG-6 drift.
+    def key?(arg)
+      load! if @entries.nil?
+      @entries.key?(arg)
+    end
+
     # MIG-2: a Hit for a key in the files, or nil for a literal (MIG-6: logged at debug).
     def lookup(arg)
       load! if @entries.nil?

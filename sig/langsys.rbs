@@ -368,6 +368,7 @@ module Langsys
     attr_reader problems: Array[Hash[Symbol, untyped]]
     def initialize: (untyped, ?source_locale: String, ?logger: untyped) -> void
     def lookup: (String) -> Hit?
+    def key?: (String) -> bool
     def self.convert: (String, ?format: String) -> Result
     def self.placeholders: (String) -> String
     def self.convert_literal: (String, entry_point: Symbol | String, ?params: Hash[untyped, untyped]?) -> String
