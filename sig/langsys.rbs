@@ -191,6 +191,9 @@ module Langsys
     # write-storm guard: a nil block during an outage is not evidence of absence.
     def lookup_block: (String, Array[String]) -> [ String, Hash[String, untyped]?, bool ]
     def queue_content_block: (String, String, String, Array[String]) -> untyped
+    def lookup_phrase: (String, ?category: String?, ?params: Hash[untyped, untyped]?, ?locale: String?, ?record: bool) -> String
+    def catalog_block: (String?, String, ?locale: String?) -> Hash[String, untyped]?
+    def project_base_locale: () -> String?
 
     def countries: (?String?) -> Array[Country]
     def dial_codes: (?String?) -> Array[DialCode]
@@ -233,7 +236,22 @@ module Langsys
     def self.excluded_from_tokenizing?: (String | Symbol) -> bool
     def self.extract_phrases: (String?, ?Array[String]?) -> Array[String]
     def self.apply_block_translations: (String?, Hash[String, untyped], ?Array[String]?) -> String
-    def self.apply_element: (untyped, Hash[String, untyped], ?Array[String]?) -> void
+    def self.apply_element: (untyped, Hash[String, untyped], ?Array[String]?, ?include_self: bool) -> void
+    def self.unit_tokens: (untyped, ?Array[String]?) -> [ Array[String], Integer ]
+    def self.phrase_unit?: (Array[String], Integer) -> bool
+    def self.own_tokens?: (untyped, ?Array[String]?) -> bool
+    def self.marked_host?: (untyped) -> bool
+    def self.marker_on?: (untyped, Array[String]) -> bool
+    def self.translation_excluded?: (untyped) -> bool
+    def self.resolved_scope?: (untyped) -> bool
+    def self.block_identity: (untyped) -> String
+
+    module Markup
+      def self.encode: (untyped) -> [ String, Array[untyped] ]
+      def self.token_params: (Integer) -> Hash[String, String]
+      def self.render_into: (untyped, String, Array[untyped]) -> untyped
+      def self.strip_sentinels: (String) -> String
+    end
     def self.inner_html: (untyped) -> String
     def self.text_content: (untyped) -> String
     def self.parse_fragment: (String) -> untyped
@@ -252,6 +270,12 @@ module Langsys
   end
 
   # -- interpolation --------------------------------------------------------
+
+  module Controls
+    CODE_POINTS: Array[Integer]
+    PATTERN: Regexp
+    def self.strip: [T] (T) -> T
+  end
 
   module Interpolate
     SIMPLE_SLOT: Regexp

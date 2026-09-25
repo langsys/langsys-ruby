@@ -55,9 +55,11 @@ RSpec.describe "spec 8.0.1 register/lookup pairs and identity excision" do
       end
     end
 
-    it "still folds a nested DECLARATION into the enclosing block (control: only identity is excised)" do
-      html = %(<b>Welcome</b> <div data-ls-contentblock="1"><span>Folded</span></div> <em>friend</em>)
-      expect(Langsys::Html.extract_phrases(html)).to eq(%w[Welcome Folded friend])
+    it "excises a nested DECLARATION too (MARK-4), and folds a nested opt-out (control)" do
+      declared = %(<b>Welcome</b> <div data-ls-contentblock="1"><span>Inner</span></div> <em>friend</em>)
+      opted_out = %(<b>Welcome</b> <div data-ls-contentblock="0"><span>Folded</span></div> <em>friend</em>)
+      expect(Langsys::Html.extract_phrases(declared)).to eq(%w[Welcome friend])
+      expect(Langsys::Html.extract_phrases(opted_out)).to eq(%w[Welcome Folded friend])
     end
   end
 

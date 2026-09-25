@@ -144,9 +144,8 @@ RSpec.describe "spec 8.0.1 canonicalization" do
     end
 
     it "finds it on the block path too" do
-      block_id = Langsys.generate_custom_id("UI", ["Hello {name}"])
       stub_authorize(key_type: "write", write_enabled: true)
-      stub_translations("es-es", { "UI" => { block_id => { "Hello {name}" => "Hola {name}" } } })
+      stub_translations("es-es", { "UI" => { "Hello {name}" => "Hola {name}" } })
       client = build_client
       client.set_locale("es-ES")
       expect(client.translate_content_block("<p>Hello %name%</p>", category: "UI")).to include("Hola")

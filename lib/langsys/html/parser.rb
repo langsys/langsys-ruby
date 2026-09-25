@@ -25,7 +25,7 @@ module Langsys
     end
 
     def skip?(element)
-      element["translate"] == "no" || !to_s_or_nil(element["data-notrans"]).nil?
+      translation_excluded?(element)
     end
 
     def to_s_or_nil(value)
@@ -45,27 +45,26 @@ module Langsys
       out
     end
 
-    def walk_extract(node, attrs, out)
+    # +counter+, when given, counts the text nodes that produced a token (TOK-6).
+    def walk_extract(node, attrs, out, counter = nil)
       node.children.each do |child|
         if child.element?
           next if skip?(child)
           # TOK-1: the whole subtree, attributes included — a title on a <script> is no
           # more translatable than its body.
           next if excluded_from_tokenizing?(child.name)
-          # MARK-2: excised HERE, in the tokenizer, so every path gets it. It used to be
-          # done only by the page walker, so the block path folded another SDK's phrase
-          # host into the block id.
-          next if phrase_marked?(child)
-          # MARK-2, the content-block half: another SDK's resolved id, nested or not, is left
-          # whole. A declaration nested inside a fragment still folds into it; only an
-          # identity is excised.
-          next if classify_block_attribute(child) == :identity
+          # MARK-4: a marked host is a unit of its own, so it contributes no tokens here.
+          # Excised in the tokenizer, so every path that tokenizes gets it.
+          next if marked_host?(child)
 
           collect_element(child, attrs, out)
-          walk_extract(child, attrs, out)
+          walk_extract(child, attrs, out, counter)
         elsif child.text?
           text = canonical_token(child.content)
-          out << text unless text.empty?
+          next if text.empty?
+
+          out << text
+          counter[0] += 1 if counter
         end
       end
     end
@@ -117,8 +116,7 @@ module Langsys
           # apply). A subtree the tokenizer refused to tokenize is one we refuse to rewrite,
           # or a sibling token that happens to read the same gets written into it.
           next if excluded_from_tokenizing?(child.name)
-          next if phrase_marked?(child)
-          next if classify_block_attribute(child) == :identity
+          next if marked_host?(child)
 
           apply_attributes(child, translations, attrs)
           walk_apply(child, translations, attrs)
@@ -172,14 +170,41 @@ module Langsys
     # -- helpers used by full-page translation --------------------------------
 
     # Apply a translation map in place to an element and its subtree.
-    def apply_element(element, translations, attributes = nil)
+    # +include_self+ applies the element's own attributes too, for a unit whose own
+    # attributes are among its tokens (TOK-6).
+    def apply_element(element, translations, attributes = nil, include_self: false)
       attrs = attributes || DEFAULT_TRANSLATABLE_ATTRIBUTES
+      apply_attributes(element, translations, attrs) if include_self
       walk_apply(element, translations, attrs)
+    end
+
+    # TOK-6: one unit's tokens (its own translatable attributes in TOK-3 order, then its
+    # content in document order) and the number of text nodes that produced one.
+    def unit_tokens(element, attributes = nil)
+      attrs = attributes || DEFAULT_TRANSLATABLE_ATTRIBUTES
+      out = []
+      counter = [0]
+      collect_element(element, attrs, out) if element.element?
+      walk_extract(element, attrs, out, counter)
+      [out, counter[0]]
+    end
+
+    # A unit registers as a phrase only when its one token is its one text node.
+    def phrase_unit?(tokens, text_nodes)
+      tokens.length == 1 && text_nodes == 1
+    end
+
+    # Whether an element carries tokens of its own (attributes, a button value).
+    def own_tokens?(element, attributes = nil)
+      out = []
+      collect_element(element, attributes || DEFAULT_TRANSLATABLE_ATTRIBUTES, out)
+      !out.empty?
     end
 
     # Serialize a node's inner HTML (its children, not the node's own tag).
     def inner_html(node)
-      node.children.map(&:to_html).join
+      # AS_HTML without FORMAT: served markup keeps the author's layout, no added newlines.
+      node.children.map { |child| child.to_html(save_with: Nokogiri::XML::Node::SaveOptions::AS_HTML) }.join
     end
 
     # Normalized text content of an element (all descendant text, whitespace-collapsed).

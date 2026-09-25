@@ -40,25 +40,28 @@ RSpec.describe "Langsys::Client HTML translation" do
 
   describe "#translate_content_block" do
     it "applies a stored content block" do
-      custom_id = Langsys.generate_custom_id("Home", ["Welcome"])
-      stub_translations("es-es", { "Home" => { custom_id => { "Welcome" => "Bienvenido" } } })
+      custom_id = Langsys.generate_custom_id("Home", %w[Welcome home])
+      stub_translations("es-es", { "Home" => { custom_id => { "Welcome" => "Bienvenido", "home" => "casa" } } })
       client = build_client
       client.set_locale("es-ES")
-      expect(client.translate_content_block("<h3>Welcome</h3>", category: "Home")).to eq("<h3>Bienvenido</h3>")
+      expect(client.translate_content_block("<h3>Welcome <b>home</b></h3>", category: "Home"))
+        .to eq("<h3>Bienvenido <b>casa</b></h3>")
     end
 
     it "returns the original and queues an unknown block" do
       stub_translations("es-es", { "Home" => {} })
       client = build_client
       client.set_locale("es-ES")
-      out = client.translate_content_block("<h3>Welcome</h3>", category: "Home")
-      expect(out).to eq("<h3>Welcome</h3>")
+      out = client.translate_content_block("<h3>Welcome <b>home</b></h3>", category: "Home")
+      expect(out).to eq("<h3>Welcome <b>home</b></h3>")
       expect(client.has_pending?).to be true
-      expect(client.pending_content_blocks.first["phrases"]).to eq(["Welcome"])
+      expect(client.pending_content_blocks.first["phrases"]).to eq(%w[Welcome home])
     end
   end
 
   describe "#translate_page" do
+    before { stub_authorize }
+
     it "translates the title, simple blocks, and sets html lang" do
       stub_translations("es-es", { Langsys::UNCATEGORIZED => { "Welcome" => "Bienvenido", "Hello" => "Hola" } })
       client = build_client

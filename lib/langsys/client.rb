@@ -14,6 +14,7 @@ require_relative "interpolate"
 require_relative "registration"
 require_relative "discovery"
 require_relative "ellipsis"
+require_relative "controls"
 require_relative "registration_lane"
 require_relative "utilities"
 require_relative "html/parser"
@@ -164,6 +165,7 @@ module Langsys
     # Translate +phrase+ (falling back to the phrase itself if untranslated), then
     # interpolate +params+ with locale-aware CLDR formatting.
     def translate(phrase, category: nil, params: nil, locale: nil, content_block_id: nil)
+      phrase = Controls.strip(phrase)
       loc = effective_locale(locale)
       catalog = @catalog.get(loc)
 

@@ -10,7 +10,7 @@ require "spec_helper"
 # find — it happened, and it broke the CID suite's integrity assertions while presenting
 # as a fixture problem.
 module CanonFixture
-  BLOB = "1ae7bc2900c073085ae3ebbf1f81cd37c81d553b"
+  BLOB = "9027a603def2116e89456cd8979b422c4f050cd7"
   PATH = File.expand_path("fixtures/canonicalization-reference.json", __dir__)
   CASES = begin
     parsed = JSON.parse(File.read(PATH))
@@ -25,7 +25,7 @@ end
 RSpec.describe "TOK conformance" do
   describe "the shared canonicalization fixture" do
     it "is the exact blob it was vendored at" do
-      # langsys-js-typescript @ 4eac870 tests/fixtures/canonicalization-reference.json (26 rows).
+      # langsys-js-typescript tests/fixtures/canonicalization-reference.json, blob 9027a603 (32 rows).
       blob = `git hash-object #{Shellwords.escape(CanonFixture::PATH)}`.strip
       expect(blob).to eq(CanonFixture::BLOB)
     end

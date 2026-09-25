@@ -17,17 +17,8 @@ module Langsys
       def translate_content_block(html, category: nil)
         return html if html.nil? || html.empty?
 
-        cat_name = category || UNCATEGORIZED
-        phrases = Html.extract_phrases(html, @translatable_attributes)
-        return html if phrases.empty?
-
-        custom_id, block, available = lookup_block(cat_name, phrases)
-        return Html.apply_block_translations(html, block, @translatable_attributes) if block
-        # WIRE-4 write-storm clause: an unavailable catalog records nothing.
-        return html unless available
-
-        queue_content_block(html, cat_name, custom_id, phrases)
-        html
+        Html.ensure_nokogiri!
+        Html::Page.new(self, category).translate_fragment(html, category || UNCATEGORIZED)
       end
 
       # Translate a whole HTML document (head + body) in place, classifying each block as a
@@ -54,6 +45,31 @@ module Langsys
       def reset_translatable_attributes
         @translatable_attributes = Html::DEFAULT_TRANSLATABLE_ATTRIBUTES.dup
         self
+      end
+
+      # Internal (used by the HTML page translator): translate one phrase, recording a miss
+      # only when +record+ (GATE-10: text inside a resolved subtree is output, not source).
+      def lookup_phrase(text, category: nil, params: nil, locale: nil, record: true)
+        loc = effective_locale(locale)
+        catalog = @catalog.get(loc)
+        return interpolate(text, params, loc) if catalog.nil?
+
+        result = Catalog.resolve(catalog, text, category)
+        queue_missing(text, category, catalog) if record && result.missing
+        interpolate(result.text, params, loc)
+      end
+
+      # Internal: the catalog entry stored under a stamped id (MARK-3 identity), or nil.
+      def catalog_block(category, custom_id, locale: nil)
+        catalog = @catalog.get(effective_locale(locale))
+        entries = catalog && catalog[category || UNCATEGORIZED]
+        block = entries.is_a?(Hash) ? entries[custom_id] : nil
+        block.is_a?(Hash) ? block : nil
+      end
+
+      # The project's base locale from authorization, or nil when it cannot be read.
+      def project_base_locale
+        authorize_quietly&.base_locale
       end
 
       # Internal (used by the HTML page translator): look up a stored content block by its id.

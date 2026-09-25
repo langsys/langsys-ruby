@@ -4,6 +4,7 @@ require "digest"
 require "json"
 
 require_relative "types"
+require_relative "controls"
 
 module Langsys
   # Canonical serialization behind a content block's +custom_id+ (CID-1):
@@ -110,11 +111,11 @@ module Langsys
 
     def phrase_item(phrase)
       if phrase.is_a?(String)
-        { "type" => "phrase", "phrase" => phrase, "category" => nil, "translatable" => true }
+        { "type" => "phrase", "phrase" => Controls.strip(phrase), "category" => nil, "translatable" => true }
       else
         {
           "type" => "phrase",
-          "phrase" => phrase[:phrase] || phrase["phrase"],
+          "phrase" => Controls.strip(phrase[:phrase] || phrase["phrase"]),
           "category" => phrase[:category] || phrase["category"],
           "translatable" => phrase.fetch(:translatable) { phrase.fetch("translatable", true) }
         }

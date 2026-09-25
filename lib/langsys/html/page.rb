@@ -3,6 +3,7 @@
 require "set"
 
 require_relative "parser"
+require_relative "markup"
 
 module Langsys
   module Html
@@ -65,12 +66,25 @@ module Langsys
         @attrs = client.translatable_attributes
       end
 
+      # The explicit block API (translate_content_block): the fragment is one TOK-6 unit, and
+      # any marked host inside it is handled on its own terms.
+      def translate_fragment(html, category)
+        frag = Html.parse_fragment(html)
+        @selmap = {}
+        tokens, text_nodes = Html.unit_tokens(frag, @attrs)
+        changed = translate_fragment_unit(frag, html, category, tokens, text_nodes) unless tokens.empty?
+        hosts = frag.css("*").any? { |el| Html.marked_host?(el) }
+        nested_hosts(frag, category) if hosts
+        changed || hosts ? Html.inner_html(frag) : html
+      end
+
       def translate(html, selector_categories)
         doc = Nokogiri::HTML(html)
         @selmap = build_selector_map(doc, selector_categories)
         process_head(doc)
         root = doc.at_xpath("//body") || doc
         walk(root, nil)
+        mark_resolved_root(doc)
         doc.to_html
       end
 
@@ -133,84 +147,169 @@ module Langsys
 
       # -- body ---------------------------------------------------------------
 
+      # TOK-6: a container of blocks is walked; every other element is a unit, block, inline
+      # or void alike, so an <img alt> or <a title> directly under <body> is tokenized.
+      # A marked host is handled on its own terms (MARK-2, MARK-3) wherever it sits, and is
+      # excised from any unit around it (MARK-4).
       def walk(node, inherited)
         node.element_children.each do |child|
-          tag = child.name.downcase
-          next if SKIP_ELEMENTS.include?(tag)
-          next if child["translate"] == "no" || Html.to_s_or_nil(child["data-notrans"])
-          # MARK-2: already identified by another SDK's renderer — leave it whole.
-          next if Html.phrase_marked?(child)
-          # A content-block host carrying another SDK's id: not tokenized, not queued, not
-          # re-stamped and not rewritten. One block, one id.
-          next if Html.classify_block_attribute(child) == :identity
+          next if SKIP_ELEMENTS.include?(child.name.downcase) || Html.translation_excluded?(child)
 
           effective = effective_category(child, inherited)
-
-          if content_block_attr?(child)
-            handle_block(child, item_category(effective))
-          elsif tag == "svg"
-            # TOK-1 (8.0.1): a standalone svg's <text> is prose, handled as its own leaf.
-            # Not by adding svg to BLOCK_ELEMENTS: that retracted mechanism makes a paragraph
-            # holding an inline icon "contain a nested block", and it loses its own words.
-            translate_leaf(child, effective)
-          elsif BLOCK_ELEMENTS.include?(tag)
-            walk_block(child, effective)
-          else
+          if Html.marked_host?(child)
+            handle_marked_host(child, effective)
+          elsif contains_nested_blocks?(child)
             walk(child, effective)
+          else
+            translate_unit(child, effective)
+            nested_hosts(child, effective)
           end
         end
       end
 
-      def walk_block(child, effective)
-        return walk(child, effective) if contains_nested_blocks?(child)
+      # The outermost marked hosts below +element+, each registered once, on its own.
+      def nested_hosts(element, category)
+        element.element_children.each do |child|
+          next if SKIP_ELEMENTS.include?(child.name.downcase) || Html.translation_excluded?(child)
 
-        translate_leaf(child, effective)
-      end
-
-      # One leaf: a single phrase when its whole text is one token, otherwise a content block.
-      def translate_leaf(child, effective)
-        inner = Html.inner_html(child)
-        phrases = Html.extract_phrases(inner, @attrs)
-        return if phrases.empty?
-
-        item_cat = item_category(effective)
-        text = Html.text_content(child)
-        if phrases.length == 1 && phrases[0] == text
-          category = item_cat == UNCATEGORIZED ? nil : item_cat
-          Html.apply_element(child, { text => @client.translate(text, category: category, locale: @locale) }, @attrs)
-          # MARK-1's other half: a rendered phrase host carries data-ls-phrase, the same
-          # way a rendered block carries data-ls-contentblock. Stamped after the
-          # translation so the attribute names the SOURCE phrase, which is the identity,
-          # not the rendered text.
-          child["data-ls-phrase"] = text
-        else
-          apply_or_queue_block(child, item_cat, phrases, inner)
+          if Html.marked_host?(child)
+            handle_marked_host(child, effective_category(child, category))
+          else
+            nested_hosts(child, category)
+          end
         end
       end
 
-      def handle_block(element, item_cat)
-        # Marked phrase hosts are excised inside the tokenizer now, so the declared-host path
-        # and the leaf path get the same excision from the same place.
-        inner = Html.inner_html(element)
-        phrases = Html.extract_phrases(inner, @attrs)
-        return if phrases.empty?
-
-        apply_or_queue_block(element, item_cat, phrases, inner)
+      def handle_marked_host(element, effective)
+        if Html.phrase_marked?(element)
+          translate_marked_phrase(element, effective)
+        elsif Html.classify_block_attribute(element) == :identity
+          render_identity(element, effective)
+        else
+          inner = Html.inner_html(element)
+          phrases = Html.extract_phrases(inner, @attrs)
+          apply_or_queue_block(element, item_category(effective), phrases, inner) unless phrases.empty?
+        end
+        nested_hosts(element, effective)
       end
 
-      def apply_or_queue_block(element, item_cat, phrases, inner)
+      def translate_fragment_unit(frag, html, category, tokens, text_nodes)
+        if Html.phrase_unit?(tokens, text_nodes)
+          translated = @client.lookup_phrase(tokens[0], category: phrase_category(category), locale: @locale)
+          Html.apply_element(frag, { tokens[0] => translated }, @attrs)
+          return translated != tokens[0]
+        end
+
+        custom_id, block, available = @client.lookup_block(category, tokens)
+        return Html.apply_element(frag, block, @attrs) && true if block
+
+        # WIRE-4 write-storm clause: an unavailable catalog records nothing.
+        @client.queue_content_block(html, category, custom_id, tokens) if available
+        false
+      end
+
+      # One unit: a phrase when its one token is its one text node, otherwise a content block.
+      def translate_unit(child, effective)
+        tokens, text_nodes = Html.unit_tokens(child, @attrs)
+        return if tokens.empty?
+
+        item_cat = item_category(effective)
+        unless Html.phrase_unit?(tokens, text_nodes)
+          # The registered content must re-tokenize to the same tokens, so a unit whose own
+          # attributes carry tokens registers with its tag.
+          html = Html.own_tokens?(child, @attrs) ? child.to_html : Html.inner_html(child)
+          return apply_or_queue_block(child, item_cat, tokens, html, include_self: true)
+        end
+
+        text = tokens[0]
+        translated = @client.lookup_phrase(text, category: phrase_category(item_cat), locale: @locale,
+                                                 record: record?(child))
+        Html.apply_element(child, { text => translated }, @attrs)
+        # MARK-1: a rendered phrase host names its SOURCE phrase, which is its identity.
+        child["data-ls-phrase"] = text
+      end
+
+      # MARK-2: a keep-together host registers whole, its inline markup as tokens.
+      def translate_marked_phrase(element, effective)
+        text, slots = Html::Markup.encode(element)
+        category = phrase_category(item_category(effective))
+        unless text.empty?
+          rendered = @client.lookup_phrase(text, category: category, locale: @locale, record: record?(element),
+                                                 params: Html::Markup.token_params(slots.length))
+          Html::Markup.render_into(element, rendered, slots)
+        end
+        marked_host_attributes(element, category)
+      end
+
+      # A phrase host's own attributes (and its descendants', short of a nested marked host)
+      # sit outside the tokenized text, so each is a phrase of its own.
+      def marked_host_attributes(element, category)
+        own_elements(element).each do |target|
+          @attrs.each do |attr|
+            next if target[attr].nil?
+
+            value = Html.canonical_token(target[attr])
+            next if value.empty?
+
+            target[attr] = @client.lookup_phrase(value, category: category, locale: @locale, record: record?(target))
+          end
+        end
+      end
+
+      def own_elements(element)
+        [element] + element.element_children.reject { |c| Html.marked_host?(c) }.flat_map { |c| own_elements(c) }
+      end
+
+      # MARK-3: an identity host renders from the catalog entry under its id, or keeps its
+      # source when there is none, and registers nothing.
+      def render_identity(element, effective)
+        block = @client.catalog_block(item_category(effective), Html.block_identity(element), locale: @locale)
+        Html.apply_element(element, block, @attrs) if block
+      end
+
+      def apply_or_queue_block(element, item_cat, phrases, inner, include_self: false)
         custom_id, block, available = @client.lookup_block(item_cat, phrases)
         # MARK-1: the host carries the identity it was rendered from, whether or not the
-        # block resolved. An identity you cannot read off the DOM is one nobody can
-        # debug, and it is most wanted precisely when the block did NOT resolve.
-        element["data-ls-contentblock"] = custom_id
+        # block resolved. A declaration's own attribute becomes the id.
+        stamp(element, custom_id)
         if block
-          Html.apply_element(element, block, @attrs)
-        elsif available
+          Html.apply_element(element, block, @attrs, include_self: include_self)
+        elsif available && record?(element)
           # WIRE-4: only queue when the catalog actually answered — a miss during an
           # outage is not evidence the block is unregistered.
           @client.queue_content_block(inner, item_cat, custom_id, phrases)
         end
+      end
+
+      # An unmarked host gets the stamp; a declaration becomes the id. An opt-out is the
+      # author's and is never overwritten.
+      def stamp(element, custom_id)
+        case Html.classify_block_attribute(element)
+        when :absent then element["data-ls-contentblock"] = custom_id
+        when :declaration then element[Html::CONTENT_BLOCK_MARKERS.find { |a| element[a] }] = custom_id
+        end
+      end
+
+      # GATE-10 reading: a unit inside a resolved subtree is output, never source.
+      def record?(element)
+        !Html.resolved_scope?(element)
+      end
+
+      def phrase_category(item_cat)
+        item_cat == UNCATEGORIZED ? nil : item_cat
+      end
+
+      # GATE-10 producing: a render in a locale other than the project's base marks its root
+      # resolved; a base-locale render is source and stays discoverable. Unknown base: no mark.
+      def mark_resolved_root(doc)
+        root = doc.root
+        return if root.nil? || Html::RESOLVED_MARKERS.any? { |attr| root[attr] }
+
+        base = @client.project_base_locale
+        locale = Locale.normalize_locale(@locale)
+        return if base.nil? || base.empty? || Locale.normalize_locale(base) == locale
+
+        root[Html::RESOLVED_MARKERS.first] = locale
       end
 
       # -- category resolution ------------------------------------------------
@@ -232,17 +331,6 @@ module Langsys
         return match[0] if match && !match[1] # selector, non-override
 
         nil
-      end
-
-      def content_block_attr?(element)
-        Page.content_block_marked?(element)
-      end
-
-      # MARK-2: a host already carrying a phrase identity — in either spelling — has been
-      # rendered by another SDK and is already registered. Walking into it splits a block
-      # that has an id and registers its text a second time.
-      def phrase_marked?(element)
-        Html.phrase_marked?(element)
       end
 
       def contains_nested_blocks?(element)

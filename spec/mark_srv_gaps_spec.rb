@@ -61,15 +61,17 @@ RSpec.describe "canonicalization gaps" do
           "<html><body><p data-langsys-category=\"Home\">" \
           "<span #{attr}=\"Welcome\">Welcome</span> <em>friend</em></p></body></html>"
         )
-        queued = client.pending_content_blocks.flat_map { |b| b["phrases"] }
-        expect(queued).to eq(["friend"])
-        expect(queued).not_to include("Welcome")
+        # Not re-split: the host's words stay out of the unit around it, and the host
+        # registers once, whole, as the one string it defines (MARK-2, 8.2.10).
+        expect(client.pending_content_blocks).to be_empty
+        expect(client.pending_phrases.map { |p| p["phrase"] }).to contain_exactly("friend", "Welcome")
       end
 
-      it "registers nothing for a standalone #{attr} host's text" do
+      it "registers a standalone #{attr} host whole, once" do
         client = rendering_client
-        client.translate_page("<html><body><div><p #{attr}=\"Welcome\">Welcome</p></div></body></html>")
-        expect(client.pending_phrases.map { |p| p["phrase"] }).not_to include("Welcome")
+        client.translate_page("<html><body><div><p #{attr}=\"Welcome\">Welcome <b>home</b></p></div></body></html>")
+        expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Welcome {m0o}home{m0c}"])
+        expect(client.pending_content_blocks).to be_empty
       end
 
       it "excises a #{attr} host from an EXPLICIT content-block host too" do
@@ -84,9 +86,8 @@ RSpec.describe "canonicalization gaps" do
           "<html><body><div data-langsys-contentblock=\"1\">" \
           "<span #{attr}=\"Welcome\">Welcome</span> <em>friend</em></div></body></html>"
         )
-        queued = client.pending_content_blocks.flat_map { |b| b["phrases"] }
-        expect(queued).to eq(["friend"])
-        expect(queued).not_to include("Welcome")
+        expect(client.pending_content_blocks.map { |b| b["phrases"] }).to eq([["friend"]])
+        expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Welcome"])
       end
     end
 

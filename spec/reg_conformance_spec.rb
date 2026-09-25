@@ -211,8 +211,8 @@ RSpec.describe "REG conformance" do
             headers: { "Content-Type" => "application/json" } }
         end
 
-      client.translate_content_block("<p>Welcome</p>", category: "Home")
-      custom_id = Langsys.generate_custom_id("Home", ["Welcome"])
+      client.translate_content_block("<p>Welcome <b>home</b></p>", category: "Home")
+      custom_id = Langsys.generate_custom_id("Home", %w[Welcome home])
       client.flush_pending
 
       expect(client.registered?("Home", custom_id)).to be(true)

@@ -4,6 +4,7 @@ require "date"
 require "set"
 
 require_relative "cldr"
+require_relative "controls"
 
 module Langsys
   # Parameter interpolation with locale-aware CLDR formatting and an ICU subset.
@@ -58,6 +59,7 @@ module Langsys
     # notice that ignores the log level warns in production on every render).
     def call(template, params, locale = "en", logger: nil)
       params ||= {}
+      template = Controls.strip(template)
       if icu?(template)
         begin
           nodes, = Parser.new(template).parse(0)

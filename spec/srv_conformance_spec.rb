@@ -43,7 +43,7 @@ RSpec.describe "SRV conformance" do
       # the interleave, which is the failure this rule names. A class-variable @@locale
       # read mid-render survived it.
       #
-      # The hand-off here is forced, not hoped for: a two-party barrier inside walk_block
+      # The hand-off here is forced, not hoped for: a two-party barrier inside translate_unit
       # holds each thread until the other has also entered a render, so both are provably
       # suspended mid-walk at the same instant. Each thread waits exactly once, so the
       # barrier cannot deadlock on an uneven number of blocks per page.
@@ -64,7 +64,7 @@ RSpec.describe "SRV conformance" do
       armed = true
       unless Langsys::Html::Page.const_defined?(:INTERLEAVE_HOOK_INSTALLED, false)
         hook = Module.new do
-          define_method(:walk_block) do |child, effective|
+          define_method(:translate_unit) do |child, effective|
             gate = Thread.current[:langsys_interleave_gate]
             gate&.call
             super(child, effective)

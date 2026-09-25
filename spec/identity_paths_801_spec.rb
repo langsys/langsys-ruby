@@ -27,20 +27,21 @@ RSpec.describe "spec 8.0.1 identity on every path" do
     client.pending_phrases.map { |p| p["phrase"] } + client.pending_content_blocks.flat_map { |b| b["phrases"] }
   end
 
-  describe "MARK-2 — a phrase-marked host is excised inside the tokenizer, so on every path" do
+  describe "MARK-2/MARK-4 — a phrase-marked host is excised from the unit around it, on every path" do
     %w[data-ls-phrase data-langsys-phrase].each do |attr|
       it "excises a #{attr} host on the block path" do
         html = %(<span #{attr}="Welcome">Welcome</span> <em>friend</em>)
         expect(Langsys::Html.extract_phrases(html)).to eq(["friend"])
       end
 
-      it "excises a #{attr} host through translate_content_block" do
+      it "excises a #{attr} host through translate_content_block, and registers it on its own" do
         stub_authorize(key_type: "write", write_enabled: true)
         stub_translations("es-es", { "Home" => {} })
         client = build_client
         client.set_locale("es-ES")
         client.translate_content_block(%(<span #{attr}="Welcome">Welcome</span> <em>friend</em>), category: "Home")
-        expect(client.pending_content_blocks.map { |b| b["phrases"] }).to eq([["friend"]])
+        expect(client.pending_content_blocks).to be_empty
+        expect(client.pending_phrases.map { |p| p["phrase"] }).to contain_exactly("friend", "Welcome")
       end
     end
   end
@@ -79,7 +80,7 @@ RSpec.describe "spec 8.0.1 identity on every path" do
         expect(queued_tokens(client)).to eq(["Kept"])
       end
 
-      ["", "0", "false", "off", "no", " false "].each do |value|
+      ["0", "false", " FALSE "].each do |value|
         it "walks #{attr}=#{value.inspect} as ordinary content" do
           client, = page_render(%(<div #{attr}="#{value}"><p>One</p><p>Two</p></div>))
           expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(%w[One Two])
@@ -87,13 +88,13 @@ RSpec.describe "spec 8.0.1 identity on every path" do
         end
       end
 
-      it "walks the bare #{attr} as ordinary content" do
+      it "treats the bare #{attr} as a declaration: one block" do
         client, = page_render(%(<div #{attr}><p>One</p><p>Two</p></div>))
-        expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(%w[One Two])
-        expect(client.pending_content_blocks).to be_empty
+        expect(client.pending_content_blocks.map { |b| b["phrases"] }).to eq([%w[One Two]])
+        expect(client.pending_phrases).to be_empty
       end
 
-      ["1", "true", "yes", "on", " TRUE "].each do |value|
+      ["", "1", "true", "yes", " TRUE "].each do |value|
         it "treats #{attr}=#{value.inspect} as a declaration: one block" do
           client, = page_render(%(<div #{attr}="#{value}"><p>One</p><p>Two</p></div>))
           expect(client.pending_content_blocks.map { |b| b["phrases"] }).to eq([%w[One Two]])
@@ -111,19 +112,20 @@ RSpec.describe "spec 8.0.1 identity on every path" do
 
   describe "stamp placement is not corrupted by the markup around it" do
     let(:block_id) { Langsys.generate_custom_id(Langsys::UNCATEGORIZED, %w[Hello there]) }
+    let(:titled_id) { Langsys.generate_custom_id(Langsys::UNCATEGORIZED, %w[a>b Hello there]) }
 
     it "stamps a host whose double-quoted title contains >" do
       _, out = page_render('<p title="a>b">Hello <b>there</b></p>')
       host = Nokogiri::HTML(out).at_css("p")
       expect(host["title"]).to eq("a>b")
-      expect(host["data-ls-contentblock"]).to eq(block_id)
+      expect(host["data-ls-contentblock"]).to eq(titled_id)
     end
 
     it "stamps a host whose single-quoted title contains >" do
       _, out = page_render("<p title='a>b'>Hello <b>there</b></p>")
       host = Nokogiri::HTML(out).at_css("p")
       expect(host["title"]).to eq("a>b")
-      expect(host["data-ls-contentblock"]).to eq(block_id)
+      expect(host["data-ls-contentblock"]).to eq(titled_id)
     end
 
     it "stamps the host, not a leading comment containing markup" do
@@ -133,10 +135,10 @@ RSpec.describe "spec 8.0.1 identity on every path" do
       expect(doc.at_css("p")["data-ls-contentblock"]).to eq(block_id)
     end
 
-    it "stamps a single-phrase host whose title contains >" do
-      _, out = page_render('<p title="a>b">Hello</p>')
+    it "stamps a single-phrase host whose inline child's title contains >" do
+      _, out = page_render('<p><a href="/x" data-x="a>b">Hello</a></p>')
       host = Nokogiri::HTML(out).at_css("p")
-      expect(host["title"]).to eq("a>b")
+      expect(host.at_css("a")["data-x"]).to eq("a>b")
       expect(host["data-ls-phrase"]).to eq("Hello")
     end
   end

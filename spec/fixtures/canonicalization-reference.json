@@ -1,51 +1,32 @@
 {
  "": "Canonicalization + identity agreement across Langsys SDKs. AUTHORED in langsys-js-typescript, not vendored from another lane.",
- "purpose": "Proof that the SDKs mint the SAME custom_id for the same content. Covers the TOK batch's canonicalization rules — the collapse set, attribute values collapsing like text nodes, the fixed twenty-seven attributes in order — and, from spec 8.0.1, the three collapse-set boundary characters and the %name%-at-capture rule, plus TOK-1's <math> exclusion and the <svg> behavioural clause it is paired with.",
+ "purpose": "Proof that the SDKs mint the SAME custom_id for the same content. Covers the TOK batch's canonicalization rules — the collapse set, attribute values collapsing like text nodes, the fixed twenty-seven attributes in order — the three collapse-set boundary characters, the %name%-at-capture rule, TOK-1's <math> exclusion and the <svg> behavioural clause it is paired with, and TOK-2's C0 strip: the 28 stripped controls removed before collapse, TAB collapsed, DEL kept, and the strip applied to attribute values as well as text.",
  "how_to_row_against_it": "Tokenize the html field, compare to expected_tokens, then hash (category, tokens) and compare to expected_custom_id. Compare CODEPOINTS, not display strings: several cases differ only by U+00A0 or U+2028, which render identically to a space — the html_codepoints and expected_tokens_codepoints fields exist so a mismatch is readable instead of looking like two identical strings with two different hashes.",
- "expected_is": "What langsys-js-typescript produces. Every row matches spec blob 8e2527b9f30e4e8a38121eeb7c401d4db60dfa6c (specVersion 8.0.1), and as of this write every row is also matched by langsys-php-sdk. It is not an invitation to change the expectation: the JS core is the identity authority per TOK-2, so a lane that disagrees records a divergence here and fixes its own side.",
- "spec_blob": "8e2527b9f30e4e8a38121eeb7c401d4db60dfa6c (langsys 63df13c7, specVersion 8.0.1). Re-derived with `git -C ~/Documents/dev/langsys2 ls-tree 63df13c7 docs/sdk-spec.mdx` at this write, not carried from the previous one — 8.0.1 requires the header revision to be re-derived every time. NOTE on what the spec supplies: it specifies the three collapse-set rows by CODEPOINT and expected BEHAVIOUR (member / non-member), and quotes ids only for TOK-5 (1e4b462c… normalised, bb74011a… raw). Its own sentence says 'specified by codepoint and expected id here', which overstates what it lists; the ids for U+FEFF, U+0085 and U+180E were DERIVED here with the core tokenizer, per the CID-3 split between who specifies and who derives.",
+ "expected_is": "What langsys-js-typescript produces. Every row matches spec blob e22dad188f1c1e6a972961cdf9675a84d891f5ec (specVersion 8.2.10), and every row is also matched by langsys-php-sdk. A row a lane disagrees with carries a divergence note naming the lane. It is not an invitation to change the expectation: the JS core is the identity authority per TOK-2, so a lane that disagrees records a divergence here and fixes its own side.",
+ "spec_blob": "e22dad188f1c1e6a972961cdf9675a84d891f5ec (langsys2 c1b16560, specVersion 8.2.10). Re-derived with `git -C ~/Documents/dev/langsys2 ls-tree c1b16560 docs/sdk-spec.mdx` at this write, and checked against the CONFORMANCE header by `npm run verify:spec`, which fails when the two disagree. What the spec supplies: the three collapse-set rows by code point and expected behaviour (membership shown as an id equal to the plain-space row, non-membership as a distinct id). It quotes no ids for them, and from this revision it quotes none for TOK-5 either, saying they belong in this file. Every id here was derived with the core tokenizer, per the CID-3 split between who specifies and who derives.",
  "measured_at": {
   "langsys-js-typescript": "this repo, tokenizeElement + generateCustomId, re-measured at this write",
-  "langsys-php-sdk": "HtmlParser::extractPhrases + HtmlParser::generateCustomId, PHP 8.3.19, re-measured at this write. MEASURED AT TIP e28972c; the change that made it agree is 717673d (`git log -S`), which adds src/Html/Canonical.php — e28972c touches only CHANGELOG and CONFORMANCE. An earlier version of this field said PHP 'fixed' it at e28972c, conflating the tip a measurement was taken at with the commit that changed the behaviour; the Reviewer caught it.",
+  "langsys-php-sdk": "HtmlParser::extractPhrases + HtmlParser::generateCustomId, PHP 8.3.19. The rows added for TOK-2's C0 strip were measured at tip 3121404, which carries its C0 strip; every earlier row at tip e28972c, where the change that made them agree is 717673d (`git log -S`), which adds src/Html/Canonical.php. Its parser is libxml2 2.9.13 (LIBXML_DOTTED_VERSION on this host), a pre-2.14 libxml2, which drops C0 controls from DOM text but not from attribute values — the parser_dependent note on fs-in-text and vt-in-text.",
   "langsys2 (server)": "NO MINTER EXISTS. Searched by hashing call and by canonical-serialization signature, with the same searches positive-controlled against langsys-php-sdk (4 hits there, 0 here). The backend stores ids clients send; it does not compute them."
  },
  "harness_control": {
-  "why": "23-of-23 agreement is exactly the shape a broken comparison produces, so the comparison was positive-controlled before the result was believed.",
+  "why": "Near-total agreement is exactly the shape a broken comparison produces, so the comparison is positive-controlled rather than believed.",
   "controls": [
-   {
-    "input": "<p>a U+000B b</p>",
-    "result": "DIVERGE",
-    "js_tokens_codepoints": [
-     "U+0061",
-     "U+0020",
-     "U+0062"
-    ],
-    "php_tokens_codepoints": [
-     "U+0061",
-     "U+0062"
-    ],
-    "note": "libxml2 DROPS U+000B from DOM text where a JS DOM keeps it and collapses it to a space. Spec 8.0.1 names this as a parser-level split below the SDK that no tokenizer can close. Independently reproduced here, which is why it makes a good control: a real divergence the harness must see."
-   },
-   {
-    "input": "<p>a U+000C b</p>",
-    "result": "DIVERGE",
-    "note": "Same split, form feed."
-   },
    {
     "input": "JS fed <p>LEFT</p>, PHP fed <p>RIGHT</p>",
     "result": "DIVERGE",
     "note": "Proves the comparison is not structurally returning AGREE regardless of input."
    }
   ],
-  "not_rows": "The VT/FF cases are deliberately NOT fixture rows. They diverge in the parser, not the tokenizer, so no implementation can make them agree; a row whose expectation can never be met would sit here failing forever and teach a reader to ignore failures. Spec 8.0.1 records the split in prose and specified four rows, which are the four added here."
+  "parser_boundary": "libxml2 before 2.14 drops U+000B, U+000C and the other C0 controls from DOM text before any tokenizer sees it; 2.14 and newer keep them. TOK-2's strip makes the two agree on text, since the SDK removes what the older parser drops. Attribute values are where the parser does not drop them, so fs-in-attr is the row that proves an SDK strips rather than relies on its parser."
  },
  "agreement": {
-  "rows": 26,
-  "agree": 26,
+  "rows": 32,
+  "agree": 32,
   "diverge": 0
  },
  "resolved_divergences": {
-  "note": "Six rows recorded a langsys-php-sdk divergence at the previous write and all six now agree, re-measured rather than assumed. The PHP fix is 717673d (collapse set and the code-bearing-subtree exclusion); the measurement was taken at tip e28972c. Kept as a record so the next reader does not have to wonder whether anyone checked.",
+  "note": "Rows where langsys-php-sdk once minted a different id and now agrees, each re-measured rather than assumed. The first six changed with PHP 717673d (collapse set and the code-bearing-subtree exclusion), measured at tip e28972c. fs-in-attr changed with PHP 3121404 (the C0 strip), measured at that tip. Kept so the next reader does not have to wonder whether anyone checked.",
   "rows": [
    {
     "row": "nbsp-in-text",
@@ -82,6 +63,12 @@
     "was": "36441b5c714067bdd3088a54b004f00e",
     "now": "f92e4c22ed4f05658dd5640c41fd58a8",
     "note": "PHP does not collapse U+2028/U+2029 either. Same root cause as the NBSP rows. Worth noting the consequence for the three-flag json_encode work: in a DOM-tokenized path these never reach the serializer on the JS side because they collapse to spaces first, so the flags matter for a caller hashing its own token array, not for tokenized content."
+   },
+   {
+    "row": "fs-in-attr",
+    "was": "5d2089cc4c6cce4f4d5140b031f1e2c1",
+    "now": "41b13b0f29232e1c3a87a5e223ecfced",
+    "note": "libxml2 keeps a raw U+001C in an attribute value, so PHP kept it in the token until its own C0 strip ran on every phrase."
    }
   ]
  },
@@ -2358,7 +2345,7 @@
   },
   {
    "id": "brace-name-in-markup",
-   "why": "TOK-5's counterpart, and the half that makes the rule cross-lane DATA rather than one SDK's assertion. `%name%` normalising at capture only means something if the brace-authored form reaches the SAME id — otherwise both paths could drift together and agree about nothing useful. The spec AT BLOB 8e2527b9 quotes both ids — 1e4b462c… for the normalised form and bb74011a… for a path that tokenizes the raw markup. Scoped to that blob on purpose: the pending follow-up removes them from the prose, so an unscoped claim would quietly become false.",
+   "why": "TOK-5's counterpart, and the half that makes the rule cross-lane DATA rather than one SDK's assertion. `%name%` normalising at capture only means something if the brace-authored form reaches the SAME id — otherwise both paths could drift together and agree about nothing useful. The spec at blob 8e2527b9 quoted both ids (1e4b462c for the normalised form, bb74011a for a path that tokenizes the raw markup). From 5c5c0723 it names neither and says they belong in this fixture row, derived by the JS core, so this row is now where they live.",
    "html": "<p>Hello {name}</p>",
    "html_codepoints": [
     "U+003C",
@@ -2419,6 +2406,476 @@
    },
    "agree": true,
    "added_by": "spec 8.0.1 TOK-5 counterpart, added on the Reviewer’s suggestion so the equality is cross-lane"
+  },
+  {
+   "id": "along-reference",
+   "why": "The carrier with the character removed: the id U+001C and U+000B must give (TOK-2 strip clause).",
+   "html": "<p>Along   description</p>",
+   "html_codepoints": [
+    "U+003C",
+    "U+0070",
+    "U+003E",
+    "U+0041",
+    "U+006C",
+    "U+006F",
+    "U+006E",
+    "U+0067",
+    "U+0020",
+    "U+0020",
+    "U+0020",
+    "U+0064",
+    "U+0065",
+    "U+0073",
+    "U+0063",
+    "U+0072",
+    "U+0069",
+    "U+0070",
+    "U+0074",
+    "U+0069",
+    "U+006F",
+    "U+006E",
+    "U+003C",
+    "U+002F",
+    "U+0070",
+    "U+003E"
+   ],
+   "category": "UI",
+   "expected_tokens": [
+    "Along description"
+   ],
+   "expected_tokens_codepoints": [
+    [
+     "U+0041",
+     "U+006C",
+     "U+006F",
+     "U+006E",
+     "U+0067",
+     "U+0020",
+     "U+0064",
+     "U+0065",
+     "U+0073",
+     "U+0063",
+     "U+0072",
+     "U+0069",
+     "U+0070",
+     "U+0074",
+     "U+0069",
+     "U+006F",
+     "U+006E"
+    ]
+   ],
+   "expected_custom_id": "41b13b0f29232e1c3a87a5e223ecfced",
+   "measured": {
+    "langsys-js-typescript": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys-php-sdk": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys2 (server)": null
+   },
+   "agree": true,
+   "added_by": "spec 8.2.7 TOK-2 C0 strip"
+  },
+  {
+   "id": "fs-in-text",
+   "why": "U+001C is in the C0 strip set: removed before collapse, not mapped to a space, so this gives the id of along-reference (TOK-2).",
+   "html": "<p>A\u001clong   description</p>",
+   "html_codepoints": [
+    "U+003C",
+    "U+0070",
+    "U+003E",
+    "U+0041",
+    "U+001C",
+    "U+006C",
+    "U+006F",
+    "U+006E",
+    "U+0067",
+    "U+0020",
+    "U+0020",
+    "U+0020",
+    "U+0064",
+    "U+0065",
+    "U+0073",
+    "U+0063",
+    "U+0072",
+    "U+0069",
+    "U+0070",
+    "U+0074",
+    "U+0069",
+    "U+006F",
+    "U+006E",
+    "U+003C",
+    "U+002F",
+    "U+0070",
+    "U+003E"
+   ],
+   "category": "UI",
+   "expected_tokens": [
+    "Along description"
+   ],
+   "expected_tokens_codepoints": [
+    [
+     "U+0041",
+     "U+006C",
+     "U+006F",
+     "U+006E",
+     "U+0067",
+     "U+0020",
+     "U+0064",
+     "U+0065",
+     "U+0073",
+     "U+0063",
+     "U+0072",
+     "U+0069",
+     "U+0070",
+     "U+0074",
+     "U+0069",
+     "U+006F",
+     "U+006E"
+    ]
+   ],
+   "expected_custom_id": "41b13b0f29232e1c3a87a5e223ecfced",
+   "measured": {
+    "langsys-js-typescript": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys-php-sdk": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys2 (server)": null
+   },
+   "agree": true,
+   "parser_dependent": "Under a libxml2 older than 2.14, langsys-php-sdk's parser drops the character from DOM text before its strip runs, so on that parser this row agrees without exercising the strip. fs-in-attr is the row that exercises it on every parser, because libxml2 keeps C0 controls in attribute values.",
+   "added_by": "spec 8.2.7 TOK-2 C0 strip"
+  },
+  {
+   "id": "vt-in-text",
+   "why": "U+000B is in the strip set as well as the collapse set; the strip runs first, so VT is removed, not collapsed: the id of along-reference (TOK-2).",
+   "html": "<p>A\u000blong   description</p>",
+   "html_codepoints": [
+    "U+003C",
+    "U+0070",
+    "U+003E",
+    "U+0041",
+    "U+000B",
+    "U+006C",
+    "U+006F",
+    "U+006E",
+    "U+0067",
+    "U+0020",
+    "U+0020",
+    "U+0020",
+    "U+0064",
+    "U+0065",
+    "U+0073",
+    "U+0063",
+    "U+0072",
+    "U+0069",
+    "U+0070",
+    "U+0074",
+    "U+0069",
+    "U+006F",
+    "U+006E",
+    "U+003C",
+    "U+002F",
+    "U+0070",
+    "U+003E"
+   ],
+   "category": "UI",
+   "expected_tokens": [
+    "Along description"
+   ],
+   "expected_tokens_codepoints": [
+    [
+     "U+0041",
+     "U+006C",
+     "U+006F",
+     "U+006E",
+     "U+0067",
+     "U+0020",
+     "U+0064",
+     "U+0065",
+     "U+0073",
+     "U+0063",
+     "U+0072",
+     "U+0069",
+     "U+0070",
+     "U+0074",
+     "U+0069",
+     "U+006F",
+     "U+006E"
+    ]
+   ],
+   "expected_custom_id": "41b13b0f29232e1c3a87a5e223ecfced",
+   "measured": {
+    "langsys-js-typescript": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys-php-sdk": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys2 (server)": null
+   },
+   "agree": true,
+   "parser_dependent": "Under a libxml2 older than 2.14, langsys-php-sdk's parser drops the character from DOM text before its strip runs, so on that parser this row agrees without exercising the strip. fs-in-attr is the row that exercises it on every parser, because libxml2 keeps C0 controls in attribute values.",
+   "added_by": "spec 8.2.7 TOK-2 C0 strip"
+  },
+  {
+   "id": "tab-in-text",
+   "why": "U+0009 is not in the strip set; it collapses to one space, giving the plain-space id (TOK-2).",
+   "html": "<p>A\tlong   description</p>",
+   "html_codepoints": [
+    "U+003C",
+    "U+0070",
+    "U+003E",
+    "U+0041",
+    "U+0009",
+    "U+006C",
+    "U+006F",
+    "U+006E",
+    "U+0067",
+    "U+0020",
+    "U+0020",
+    "U+0020",
+    "U+0064",
+    "U+0065",
+    "U+0073",
+    "U+0063",
+    "U+0072",
+    "U+0069",
+    "U+0070",
+    "U+0074",
+    "U+0069",
+    "U+006F",
+    "U+006E",
+    "U+003C",
+    "U+002F",
+    "U+0070",
+    "U+003E"
+   ],
+   "category": "UI",
+   "expected_tokens": [
+    "A long description"
+   ],
+   "expected_tokens_codepoints": [
+    [
+     "U+0041",
+     "U+0020",
+     "U+006C",
+     "U+006F",
+     "U+006E",
+     "U+0067",
+     "U+0020",
+     "U+0064",
+     "U+0065",
+     "U+0073",
+     "U+0063",
+     "U+0072",
+     "U+0069",
+     "U+0070",
+     "U+0074",
+     "U+0069",
+     "U+006F",
+     "U+006E"
+    ]
+   ],
+   "expected_custom_id": "5e91dc83aa1cb4c3d1146a7c0e00d1f4",
+   "measured": {
+    "langsys-js-typescript": {
+     "tokens": [
+      "A long description"
+     ],
+     "custom_id": "5e91dc83aa1cb4c3d1146a7c0e00d1f4"
+    },
+    "langsys-php-sdk": {
+     "tokens": [
+      "A long description"
+     ],
+     "custom_id": "5e91dc83aa1cb4c3d1146a7c0e00d1f4"
+    },
+    "langsys2 (server)": null
+   },
+   "agree": true,
+   "added_by": "spec 8.2.7 TOK-2 C0 strip"
+  },
+  {
+   "id": "del-in-text",
+   "why": "U+007F is outside the strip set and outside the collapse set; it is kept, giving a distinct id (TOK-2).",
+   "html": "<p>A\u007flong   description</p>",
+   "html_codepoints": [
+    "U+003C",
+    "U+0070",
+    "U+003E",
+    "U+0041",
+    "U+007F",
+    "U+006C",
+    "U+006F",
+    "U+006E",
+    "U+0067",
+    "U+0020",
+    "U+0020",
+    "U+0020",
+    "U+0064",
+    "U+0065",
+    "U+0073",
+    "U+0063",
+    "U+0072",
+    "U+0069",
+    "U+0070",
+    "U+0074",
+    "U+0069",
+    "U+006F",
+    "U+006E",
+    "U+003C",
+    "U+002F",
+    "U+0070",
+    "U+003E"
+   ],
+   "category": "UI",
+   "expected_tokens": [
+    "A\u007flong description"
+   ],
+   "expected_tokens_codepoints": [
+    [
+     "U+0041",
+     "U+007F",
+     "U+006C",
+     "U+006F",
+     "U+006E",
+     "U+0067",
+     "U+0020",
+     "U+0064",
+     "U+0065",
+     "U+0073",
+     "U+0063",
+     "U+0072",
+     "U+0069",
+     "U+0070",
+     "U+0074",
+     "U+0069",
+     "U+006F",
+     "U+006E"
+    ]
+   ],
+   "expected_custom_id": "abdbc9978006a3140876a12f9b926319",
+   "measured": {
+    "langsys-js-typescript": {
+     "tokens": [
+      "A\u007flong description"
+     ],
+     "custom_id": "abdbc9978006a3140876a12f9b926319"
+    },
+    "langsys-php-sdk": {
+     "tokens": [
+      "A\u007flong description"
+     ],
+     "custom_id": "abdbc9978006a3140876a12f9b926319"
+    },
+    "langsys2 (server)": null
+   },
+   "agree": true,
+   "added_by": "spec 8.2.7 TOK-2 C0 strip"
+  },
+  {
+   "id": "fs-in-attr",
+   "why": "The discriminating row: every parser keeps a raw U+001C in an attribute value, pre-2.14 libxml2 included, so each SDK must strip it itself. Same tokens, so the same id, as along-reference (TOK-2).",
+   "html": "<img alt=\"A\u001clong   description\">",
+   "html_codepoints": [
+    "U+003C",
+    "U+0069",
+    "U+006D",
+    "U+0067",
+    "U+0020",
+    "U+0061",
+    "U+006C",
+    "U+0074",
+    "U+003D",
+    "U+0022",
+    "U+0041",
+    "U+001C",
+    "U+006C",
+    "U+006F",
+    "U+006E",
+    "U+0067",
+    "U+0020",
+    "U+0020",
+    "U+0020",
+    "U+0064",
+    "U+0065",
+    "U+0073",
+    "U+0063",
+    "U+0072",
+    "U+0069",
+    "U+0070",
+    "U+0074",
+    "U+0069",
+    "U+006F",
+    "U+006E",
+    "U+0022",
+    "U+003E"
+   ],
+   "category": "UI",
+   "expected_tokens": [
+    "Along description"
+   ],
+   "expected_tokens_codepoints": [
+    [
+     "U+0041",
+     "U+006C",
+     "U+006F",
+     "U+006E",
+     "U+0067",
+     "U+0020",
+     "U+0064",
+     "U+0065",
+     "U+0073",
+     "U+0063",
+     "U+0072",
+     "U+0069",
+     "U+0070",
+     "U+0074",
+     "U+0069",
+     "U+006F",
+     "U+006E"
+    ]
+   ],
+   "expected_custom_id": "41b13b0f29232e1c3a87a5e223ecfced",
+   "measured": {
+    "langsys-js-typescript": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys-php-sdk": {
+     "tokens": [
+      "Along description"
+     ],
+     "custom_id": "41b13b0f29232e1c3a87a5e223ecfced"
+    },
+    "langsys2 (server)": null
+   },
+   "agree": true,
+   "added_by": "spec 8.2.7 TOK-2 C0 strip"
   }
  ]
 }

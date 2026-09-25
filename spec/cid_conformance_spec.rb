@@ -123,22 +123,22 @@ RSpec.describe "CID conformance" do
       client = build_client
       stub_authorize
       stub_translations("en-us", {})
-      client.translate_content_block("<p>Save</p>")
+      client.translate_content_block("<p>Save <b>now</b></p>")
       queued = client.pending_content_blocks.first
-      expect(queued["custom_id"]).to eq(Langsys.generate_custom_id("", ["Save"]))
+      expect(queued["custom_id"]).to eq(Langsys.generate_custom_id("", %w[Save now]))
     end
   end
 
   describe "CID-3 — tolerate historical ids on lookup; never emit them" do
-    let(:phrases) { ["Welcome"] }
+    let(:phrases) { %w[Welcome home] }
     let(:legacy_id) { Digest::MD5.hexdigest(["Home", *phrases].join("|")) }
 
     it "resolves a block stored under the legacy pipe-join id" do
       client = build_client
       stub_authorize
-      stub_translations("es-es", { "Home" => { legacy_id => { "Welcome" => "Bienvenido" } } })
+      stub_translations("es-es", { "Home" => { legacy_id => { "Welcome" => "Bienvenido", "home" => "casa" } } })
       client.set_locale("es-ES")
-      expect(client.translate_content_block("<p>Welcome</p>", category: "Home")).to include("Bienvenido")
+      expect(client.translate_content_block("<p>Welcome <b>home</b></p>", category: "Home")).to include("Bienvenido")
     end
 
     it "emits only the canonical id when registering, never the legacy one" do
@@ -146,7 +146,7 @@ RSpec.describe "CID conformance" do
       stub_authorize
       stub_translations("es-es", { "Home" => {} })
       client.set_locale("es-ES")
-      client.translate_content_block("<p>Welcome</p>", category: "Home")
+      client.translate_content_block("<p>Welcome <b>home</b></p>", category: "Home")
       queued = client.pending_content_blocks.first
       expect(queued["custom_id"]).to eq(Langsys.generate_custom_id("Home", phrases))
       expect(queued["custom_id"]).not_to eq(legacy_id)
@@ -157,11 +157,11 @@ RSpec.describe "CID conformance" do
       client = build_client
       stub_authorize
       stub_translations("es-es", { "Home" => {
-                          canonical => { "Welcome" => "Canonical" },
-                          legacy_id => { "Welcome" => "Legacy" }
+                          canonical => { "Welcome" => "Canonical", "home" => "casa" },
+                          legacy_id => { "Welcome" => "Legacy", "home" => "casa" }
                         } })
       client.set_locale("es-ES")
-      expect(client.translate_content_block("<p>Welcome</p>", category: "Home")).to include("Canonical")
+      expect(client.translate_content_block("<p>Welcome <b>home</b></p>", category: "Home")).to include("Canonical")
     end
   end
 
@@ -175,21 +175,23 @@ RSpec.describe "CID conformance" do
     # machine translation refills it, the page still looks right, and the human
     # translations sit orphaned on the old id.
     it "resolves a block stored under the empty-category pipe spelling" do
-      legacy = Digest::MD5.hexdigest(["", "Welcome"].join("|"))
+      legacy = Digest::MD5.hexdigest(["", "Welcome", "home"].join("|"))
       client = build_client
       stub_authorize
-      stub_translations("es-es", { Langsys::UNCATEGORIZED => { legacy => { "Welcome" => "Bienvenido" } } })
+      stub_translations("es-es",
+                        { Langsys::UNCATEGORIZED => { legacy => { "Welcome" => "Bienvenido", "home" => "casa" } } })
       client.set_locale("es-ES")
-      expect(client.translate_content_block("<p>Welcome</p>")).to include("Bienvenido")
+      expect(client.translate_content_block("<p>Welcome <b>home</b></p>")).to include("Bienvenido")
     end
 
     it "resolves a block stored under the __uncategorized__ sentinel pipe spelling" do
-      legacy = Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome"].join("|"))
+      legacy = Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome", "home"].join("|"))
       client = build_client
       stub_authorize
-      stub_translations("es-es", { Langsys::UNCATEGORIZED => { legacy => { "Welcome" => "Bienvenido" } } })
+      stub_translations("es-es",
+                        { Langsys::UNCATEGORIZED => { legacy => { "Welcome" => "Bienvenido", "home" => "casa" } } })
       client.set_locale("es-ES")
-      expect(client.translate_content_block("<p>Welcome</p>")).to include("Bienvenido")
+      expect(client.translate_content_block("<p>Welcome <b>home</b></p>")).to include("Bienvenido")
     end
 
     it "offers both uncategorised spellings, most likely first and deduped" do
@@ -207,12 +209,12 @@ RSpec.describe "CID conformance" do
     end
 
     it "still content-verifies a sentinel-spelling match before attaching" do
-      legacy = Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome"].join("|"))
+      legacy = Digest::MD5.hexdigest([Langsys::UNCATEGORIZED, "Welcome", "home"].join("|"))
       client = build_client
       stub_authorize
       stub_translations("es-es", { Langsys::UNCATEGORIZED => { legacy => { "Different phrase" => "Otra" } } })
       client.set_locale("es-ES")
-      out = client.translate_content_block("<p>Welcome</p>")
+      out = client.translate_content_block("<p>Welcome <b>home</b></p>")
       expect(out).to include("Welcome")
       expect(out).not_to include("Otra")
     end
@@ -221,39 +223,40 @@ RSpec.describe "CID conformance" do
   describe "CID-4 — verify a legacy match on content before attaching" do
     # The historical id spaces are not injective, so a legacy hit is not proof of identity.
     it "declines a legacy match whose phrases differ from the current block" do
-      colliding = Digest::MD5.hexdigest(%w[Home Welcome].join("|"))
+      colliding = Digest::MD5.hexdigest(%w[Home Welcome home].join("|"))
       client = build_client
       stub_authorize
       # Same legacy id, different content — the collision case the guard exists for.
       stub_translations("es-es", { "Home" => { colliding => { "Something else entirely" => "Otra cosa" } } })
       client.set_locale("es-ES")
-      out = client.translate_content_block("<p>Welcome</p>", category: "Home")
+      out = client.translate_content_block("<p>Welcome <b>home</b></p>", category: "Home")
       expect(out).to include("Welcome")
       expect(out).not_to include("Otra cosa")
     end
 
     it "attaches when the legacy match's phrases do agree (positive control)" do
       # Without this, the guard above could pass by never attaching to anything.
-      legacy = Digest::MD5.hexdigest(%w[Home Welcome].join("|"))
+      legacy = Digest::MD5.hexdigest(%w[Home Welcome home].join("|"))
       client = build_client
       stub_authorize
-      stub_translations("es-es", { "Home" => { legacy => { "Welcome" => "Bienvenido" } } })
+      stub_translations("es-es", { "Home" => { legacy => { "Welcome" => "Bienvenido", "home" => "casa" } } })
       client.set_locale("es-ES")
-      expect(client.translate_content_block("<p>Welcome</p>", category: "Home")).to include("Bienvenido")
+      expect(client.translate_content_block("<p>Welcome <b>home</b></p>", category: "Home")).to include("Bienvenido")
     end
   end
 
   describe "CID-4 — the content check is what declines a colliding legacy match" do
     it "declines a collision that shares a phrase with the current block, and queues the block" do
-      colliding = Digest::MD5.hexdigest(%w[Home Welcome].join("|"))
+      colliding = Digest::MD5.hexdigest(%w[Home Welcome home].join("|"))
       client = build_client
       stub_authorize
       stub_translations("es-es", { "Home" => { colliding => { "Welcome" => "Bienvenido", "Extra" => "Extra" } } })
       client.set_locale("es-ES")
 
-      expect(client.translate_content_block("<p>Welcome</p>", category: "Home")).not_to include("Bienvenido")
+      expect(client.translate_content_block("<p>Welcome <b>home</b></p>",
+                                            category: "Home")).not_to include("Bienvenido")
       expect(client.pending_content_blocks.map { |b| b["custom_id"] })
-        .to eq([Langsys.generate_custom_id("Home", %w[Welcome])])
+        .to eq([Langsys.generate_custom_id("Home", %w[Welcome home])])
     end
   end
 end
