@@ -89,6 +89,7 @@ module Langsys
       # CACHE-2: per locale (this store is per project), held by this long-lived object and
       # never written to the shared cache: {locale => [retry_at, delay]}.
       @failures = {}
+      @seeds = {}
       @locks = {}
       @guard = Mutex.new
     end
@@ -132,6 +133,16 @@ module Langsys
         catalog
       end
     end
+
+    # SNAP-2: a preloaded catalog for +locale+, answering lookups until the live one loads.
+    def seed_locale(locale, catalog)
+      @seeds[Locale.normalize_locale(locale)] = catalog
+    end
+
+    def seed(locale) = @seeds[Locale.normalize_locale(locale)]
+
+    # Whether the live catalog for +locale+ is in memory.
+    def loaded?(locale) = @memory.key?(Locale.normalize_locale(locale))
 
     # GATE-3: drop the recorded decision without touching cached catalog data.
     def reset_write_decision!

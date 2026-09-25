@@ -142,7 +142,8 @@ module Langsys
                                   "supported: #{SUPPORTED.join(', ')}"
       end
 
-      { path: path, format: format }
+      namespace = file.is_a?(Hash) ? (file[:namespace] || file["namespace"]) : nil
+      { path: path, format: format, namespace: namespace&.to_s }
     end
 
     def default_format(path)
@@ -158,6 +159,12 @@ module Langsys
       @entries = {}
       @specs.each do |spec|
         each_entry(spec) do |key, hit|
+          # MIG-5/MIG-7: a file declared with a namespace (a per-file group) answers only keys
+          # under it, and the namespace is their category.
+          if (ns = spec[:namespace])
+            key = "#{ns}.#{key}"
+            hit.category = ns
+          end
           if @entries.key?(key)
             @duplicates << key unless @duplicates.include?(key)
           else

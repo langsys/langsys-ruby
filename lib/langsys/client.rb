@@ -40,7 +40,7 @@ module Langsys
     def initialize(api_key: nil, project_id: nil, api_url: nil, base_locale: nil, locale: nil,
                    locale_source: nil, cache: nil, cache_ttl: nil, timeout: nil,
                    auto_flush: false, logger: nil, clock: nil, messages_category: nil,
-                   migration: nil, migration_locale: nil)
+                   migration: nil, migration_locale: nil, snapshot: nil)
       @config = Config.resolve(
         api_key: api_key, project_id: project_id, api_url: api_url,
         base_locale: base_locale, cache_ttl: cache_ttl, timeout: timeout
@@ -55,6 +55,7 @@ module Langsys
       @cache = cache || Cache::File.new
       @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl, logger: @logger,
                                                                      clock: clock)
+      seed_snapshot(snapshot) if snapshot
 
       seed = Locale.canonicalize_locale(locale || @config.base_locale || "")
       if locale_source
@@ -200,19 +201,37 @@ module Langsys
     attr_reader :migration
 
     def render_phrase(phrase, category, params, locale, content_block_id)
-      loc = effective_locale(locale)
-      catalog = @catalog.get(loc)
-
-      # WIRE-4: no catalog means we cannot distinguish a miss from a hit, so we degrade to
-      # the source phrase and record NOTHING — queueing here would turn every outage into
-      # a write storm on exactly the paths that were already failing.
-      return interpolate(phrase, params, loc) if catalog.nil?
-
-      result = Catalog.resolve(catalog, phrase, category, content_block_id)
-      queue_missing(phrase, category, catalog) if result.missing && content_block_id.nil?
-      interpolate(result.text, params, loc)
+      resolve_text(phrase, category, params, effective_locale(locale), content_block_id: content_block_id)
     end
     private :render_phrase
+
+    # One phrase against the catalog. A preloaded snapshot answers what it holds until the live
+    # catalog for the locale has loaded (SNAP-2); anything else reads the live catalog, and a
+    # miss is decided only against it (REG-13). No live catalog: source text, and nothing recorded
+    # (WIRE-4).
+    def resolve_text(text, category, params, loc, record: true, content_block_id: nil)
+      seed = @catalog.seed(loc)
+      if seed && !@catalog.loaded?(loc)
+        preloaded = Catalog.resolve(seed, text, category, content_block_id)
+        return interpolate(preloaded.text, params, loc) unless preloaded.missing
+      end
+
+      catalog = @catalog.get(loc)
+      return interpolate(text, params, loc) if catalog.nil?
+
+      result = Catalog.resolve(catalog, text, category, content_block_id)
+      queue_missing(text, category, catalog) if record && result.missing && content_block_id.nil?
+      interpolate(result.text, params, loc)
+    end
+    private :resolve_text
+
+    # SNAP-2 through the core loader: a snapshot seeds each locale it carries as the preloaded
+    # catalog. A snapshot the loader refuses raises here, when the client is built.
+    def seed_snapshot(path)
+      snapshot = Snapshot.load(path)
+      snapshot.locales.each { |loc| @catalog.seed_locale(loc, snapshot.catalog(loc) || {}) }
+    end
+    private :seed_snapshot
 
     # -- reference data (utilities) ------------------------------------------
 

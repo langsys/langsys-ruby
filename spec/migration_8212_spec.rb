@@ -165,6 +165,21 @@ RSpec.describe "spec 8.2.12 legacy-key migration (MIG)" do
     end
   end
 
+  describe "MIG-8 — one contract, two entry points over one resolver" do
+    it "gives t() and the I18n.t entry point the same phrase, id and category for a plural-converting key" do
+      via_t = client([File.join(dir, "en.yml")])
+      via_t.t("cart.items", params: { count: 2 })
+      via_rails = client([File.join(dir, "en.yml")])
+      via_rails.translate_legacy("cart.items", entry_point: :rails, params: { count: 2 })
+      t_category, t_phrase = queued(via_t).first
+      rails_category, rails_phrase = queued(via_rails).first
+      expect([rails_category, rails_phrase]).to eq([t_category, t_phrase])
+      expect(t_phrase).to eq("{count, plural, =0 {Your cart is empty} one {# item} other {# items}}")
+      expect(Langsys.generate_custom_id(rails_category, [rails_phrase]))
+        .to eq(Langsys.generate_custom_id(t_category, [t_phrase]))
+    end
+  end
+
   describe "MIG-7 — files, formats, nesting, and more than one" do
     it "resolves a nested key by path in JSON and in YAML" do
       sdk = client([File.join(dir, "plain.json"), File.join(dir, "en.yml")])

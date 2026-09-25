@@ -50,13 +50,7 @@ module Langsys
       # Internal (used by the HTML page translator): translate one phrase, recording a miss
       # only when +record+ (GATE-10: text inside a resolved subtree is output, not source).
       def lookup_phrase(text, category: nil, params: nil, locale: nil, record: true)
-        loc = effective_locale(locale)
-        catalog = @catalog.get(loc)
-        return interpolate(text, params, loc) if catalog.nil?
-
-        result = Catalog.resolve(catalog, text, category)
-        queue_missing(text, category, catalog) if record && result.missing
-        interpolate(result.text, params, loc)
+        resolve_text(text, category, params, effective_locale(locale), record: record)
       end
 
       # Internal: the catalog entry stored under a stamped id (MARK-3 identity), or nil.
@@ -76,10 +70,10 @@ module Langsys
                                       accept_language: accept_language)
       end
 
-      # SNAP-1: the catalog GET /translations/data serves for +locale+, uncached and unfiltered.
+      # SNAP-1: the flat catalog GET /translations serves for +locale+, uncached and unfiltered.
       def catalog_data(locale)
-        @http.get("translations/data", { "project_id" => @config.project_id,
-                                         "locale" => Locale.normalize_locale(locale) })["data"]
+        @http.get("translations", { "project_id" => @config.project_id, "locale" => Locale.normalize_locale(locale),
+                                    "format" => "flat" })["data"]
       end
 
       def project_id = @config.project_id
@@ -106,7 +100,13 @@ module Langsys
       # evidence the block is unregistered.
       def lookup_block(item_cat, phrases)
         custom_id = Langsys.generate_custom_id(item_cat, phrases)
-        catalog = @catalog.get(effective_locale)
+        loc = effective_locale
+        seed = @catalog.seed(loc)
+        if seed && !@catalog.loaded?(loc)
+          preloaded = seed[item_cat].is_a?(Hash) ? seed[item_cat][custom_id] : nil
+          return [custom_id, preloaded, true] if preloaded.is_a?(Hash)
+        end
+        catalog = @catalog.get(loc)
         return [custom_id, nil, false] if catalog.nil?
 
         cat = catalog[item_cat]

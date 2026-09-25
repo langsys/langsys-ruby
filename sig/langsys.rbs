@@ -148,7 +148,7 @@ module Langsys
   # -- client ---------------------------------------------------------------
 
   class Client
-    def initialize: (?String?, ?String?, ?api_key: String?, ?project_id: String?, ?api_url: String?, ?base_locale: String?, ?locale: String?, ?locale_source: untyped, ?cache: untyped, ?cache_ttl: Integer?, ?timeout: Float?, ?auto_flush: bool, ?logger: untyped) -> void
+    def initialize: (?String?, ?String?, ?api_key: String?, ?project_id: String?, ?api_url: String?, ?base_locale: String?, ?locale: String?, ?locale_source: untyped, ?cache: untyped, ?cache_ttl: Integer?, ?timeout: Float?, ?auto_flush: bool, ?logger: untyped, ?clock: (^() -> Float)?, ?messages_category: String?, ?migration: untyped, ?migration_locale: String?, ?snapshot: String?) -> void
 
     def authorize: (?force: bool) -> Project
     def project: () -> Project
@@ -380,14 +380,21 @@ module Langsys
   class Snapshot
     FORMAT: String
     VERSION: Integer
+    HASHED: Array[String]
+    ESCAPES: Hash[String, String]
     attr_reader project_id: String
     attr_reader generated_at: String
-    attr_reader locales: Hash[String, untyped]
-    def self.export: (Client, locales: Array[String], categories: Array[String]) -> Snapshot
-    def self.build: (String, Hash[String, untyped], ?generated_at: String) -> Snapshot
+    attr_reader base_locale: String
+    attr_reader locales: Array[String]
+    attr_reader categories: Array[String]
+    def self.export: (Client, locales: Array[String], categories: Array[String], ?generated_at: Time) -> Snapshot
     def self.load: (String) -> Snapshot
-    def initialize: (project_id: String, locales: Hash[String, untyped], generated_at: String) -> void
-    def catalog: (String) -> untyped
+    def self.parse: (String, ?source: String) -> Snapshot
+    def self.refuse: (String, String) -> bot
+    def self.canonical: (untyped) -> String
+    def self.string: (String) -> String
+    def initialize: (project_id: String, generated_at: String, base_locale: String, locales: Array[String], categories: Array[String], catalog: Hash[String, untyped]) -> void
+    def catalog: (?String?) -> untyped
     def checksum: () -> String
     def to_h: () -> Hash[String, untyped]
     def write: (String) -> String

@@ -6,11 +6,11 @@ module Langsys
   # Checks CONFORMANCE.md against the canonical format the fleet checker reads, and computes
   # the tally from the rows rather than trusting a hand-written summary.
   module ConformanceChecker
-    SPEC_COMMIT_PREFIX = "a1b7568c"
-    SPEC_BLOB = "b0474afba2c9c1639baa8da219fa6a441b3e1c2f"
+    SPEC_COMMIT_PREFIX = "f5568b88"
+    SPEC_BLOB = "b9fd4b5b1c15f7ba29656d550dca1f06013327c0"
 
     # The 113 rule ids in that blob, in spec order. Derived, not typed:
-    #   git -C ../langsys2 cat-file blob b0474afb | grep -oE '^### [A-Z]+-[0-9]+ ' | awk '{print $2}'
+    #   git -C ../langsys2 cat-file blob b9fd4b5b | grep -oE '^### [A-Z]+-[0-9]+ ' | awk '{print $2}'
     SPEC_IDS = %w[
       GATE-1 GATE-2 GATE-3 GATE-4 GATE-5 GATE-6 GATE-7 GATE-8 GATE-9 GATE-10
       CAT-1 CAT-2 CAT-3 REG-1 REG-2 REG-3 REG-4 REG-5 REG-6 REG-7
