@@ -84,6 +84,17 @@ module Langsys
 
       def project_id = @config.project_id
 
+      # GATE-10, producing: the canonical lowercase render locale when it differs from the
+      # project's base locale, so the output it marks is resolved; nil for a base-locale render,
+      # which is source and stays discoverable, and nil when the base cannot be read.
+      def resolved_locale(locale = nil)
+        base = project_base_locale
+        return nil if base.nil? || base.empty?
+
+        render = Locale.normalize_locale(effective_locale(locale))
+        render == Locale.normalize_locale(base) ? nil : render
+      end
+
       # The project's base locale from authorization, or nil when it cannot be read.
       def project_base_locale
         authorize_quietly&.base_locale

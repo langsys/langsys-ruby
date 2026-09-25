@@ -196,6 +196,30 @@ RSpec.describe "spec 8.2.10 units and markers" do
       expect(Nokogiri::HTML(out).at_css("html")["data-ls-resolved"]).to be_nil
     end
 
+    describe "Client#resolved_locale, the same decision for a binding's layout helper" do
+      def client_with(base:, status: 200)
+        stub_request(:get, "https://api.test/api/authorize-project/proj-1")
+          .to_return(status: status, headers: { "Content-Type" => "application/json" },
+                     body: JSON.generate(authorize_body.tap { |b| b["data"]["base_locale"] = base }))
+        build_client
+      end
+
+      it "returns the canonical render locale when it differs from the base" do
+        sdk = client_with(base: "en-us")
+        sdk.set_locale("es-ES")
+        expect(sdk.resolved_locale).to eq("es-es")
+        expect(sdk.resolved_locale("fr-FR")).to eq("fr-fr")
+      end
+
+      it "returns nil for a base-locale render" do
+        expect(client_with(base: "en-us").resolved_locale("en-US")).to be_nil
+      end
+
+      it "returns nil when authorization is unavailable" do
+        expect(client_with(base: "en-us", status: 500).resolved_locale("es-ES")).to be_nil
+      end
+    end
+
     it "records no miss inside a resolved subtree, and does under an opt-out" do
       client, = page("<div data-langsys-resolved><p>Already out</p></div>" \
                      '<div data-ls-resolved="false"><p>Source</p></div>')

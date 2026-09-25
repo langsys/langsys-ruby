@@ -305,11 +305,8 @@ module Langsys
         root = doc.root
         return if root.nil? || Html::RESOLVED_MARKERS.any? { |attr| root[attr] }
 
-        base = @client.project_base_locale
-        locale = Locale.normalize_locale(@locale)
-        return if base.nil? || base.empty? || Locale.normalize_locale(base) == locale
-
-        root[Html::RESOLVED_MARKERS.first] = locale
+        locale = @client.resolved_locale(@locale)
+        root[Html::RESOLVED_MARKERS.first] = locale if locale
       end
 
       # -- category resolution ------------------------------------------------
