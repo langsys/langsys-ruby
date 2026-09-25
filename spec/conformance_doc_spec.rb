@@ -21,7 +21,7 @@ RSpec.describe "CONFORMANCE.md" do
     Langsys::ConformanceChecker.run(ConformanceDoc::PATH, spec_repo: ConformanceDoc::SPEC_REPO, quiet: true)
   end
 
-  it "passes the canonical-format check: header, profiles, all 79 ids exactly once, status and tier" do
+  it "passes the canonical-format check: header, profiles, every spec rule id exactly once, status and tier" do
     expect(result.errors).to be_empty, result.errors.first(20).join("\n")
   end
 

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "logger"
+require "stringio"
 
 # Conformance specs for the ICU rule family (ICU-1..ICU-5).
 # Distinct text per branch: a simplified renderer that only knows one/other cannot fake
@@ -55,6 +57,17 @@ RSpec.describe "ICU conformance" do
     it "treats a present-but-nil plural argument as absent" do
       expect(Langsys::Interpolate.call("{n, plural, one {# item} other {# items}}", { n: nil }, "en-US"))
         .to eq("{n} items")
+    end
+
+    it "recovers a nil argument as a missing one, with ICU-4's notice and no formatter-failure warning" do
+      Langsys::Interpolate::RECOVERY_NOTICES_SEEN.clear
+      Langsys::Interpolate::FAILURE_NOTICES_SEEN.clear
+      log = StringIO.new
+      logger = Logger.new(log)
+      out = Langsys::Interpolate.call("{n, plural, one {# item} other {# items}}", { n: nil }, "en-US", logger: logger)
+      expect(out).to eq("{n} items")
+      expect(log.string).to match(/DEBUG.*\{n\}/)
+      expect(log.string).not_to match(/formatter failed/)
     end
 
     it "does not render nil as 0 — the plausible-but-false rendering" do
