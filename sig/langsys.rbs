@@ -332,6 +332,7 @@ module Langsys
       attr_reader problems: Array[Hash[Symbol, untyped]]
       def initialize: () -> void
       def add: (String, ?source: String?, ?field: String?) -> self
+      def problem: (source: String?, issue: String, fix: String, ?field: String?) -> self
       def issue_for: (String) -> [String, String]?
     end
 

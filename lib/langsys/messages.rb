@@ -152,6 +152,13 @@ module Langsys
         self
       end
 
+      # A problem that is not a bad template: a validated field with no label (MSG-10), or a
+      # custom rule whose templates the app has not declared. The command names it and exits 1.
+      def problem(source:, issue:, fix:, field: nil)
+        @problems << { source: source, field: field, issue: issue, fix: fix }
+        self
+      end
+
       def issue_for(template)
         if template.include?("{{") || template.match?(FRAMEWORK_PLACEHOLDER)
           placeholder = template[/\{\{[^}]*\}\}/] || template[FRAMEWORK_PLACEHOLDER]
@@ -184,6 +191,9 @@ module Langsys
         source = @name
         recorder.define_singleton_method(:add) do |template, field: nil|
           catalog.add(template, source: source, field: field)
+        end
+        recorder.define_singleton_method(:problem) do |issue:, fix:, field: nil|
+          catalog.problem(source: source, field: field, issue: issue, fix: fix)
         end
         @block.call(recorder)
         catalog

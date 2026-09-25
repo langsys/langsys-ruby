@@ -187,6 +187,21 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
       expect(out.string).to include("The email is required.")
     end
 
+    it "records a problem that is not a bad template, and exits non-zero naming it (MSG-10's unlabelled field)" do
+      catalog = Langsys::Messages::TemplateCatalog.new
+      catalog.problem(source: "User", field: "cc_number", issue: "validated field has no label", fix: "declare one")
+      expect(catalog.problems).to eq([{ source: "User", field: "cc_number", issue: "validated field has no label",
+                                        fix: "declare one" }])
+      src = Langsys::Messages::Source.new("Signup") do |c|
+        c.add("The email is required.", field: "email")
+        c.problem(field: "coupon", issue: "custom validator with no declared template", fix: "declare its templates")
+      end
+      code = Langsys::Messages::Command.run(sources: [src], out: out)
+      expect(code).to eq(1)
+      expect(out.string)
+        .to include("✗ Signup.coupon: custom validator with no declared template — declare its templates")
+    end
+
     it "exits non-zero naming the source, the field and the fix" do
       code = Langsys::Messages::Command.run(sources: [source("Signup", [["The :attribute is required.", "email"]])],
                                             out: out)
