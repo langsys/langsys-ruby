@@ -15,6 +15,8 @@ require_relative "registration"
 require_relative "discovery"
 require_relative "ellipsis"
 require_relative "controls"
+require_relative "messages"
+require_relative "client_messages"
 require_relative "registration_lane"
 require_relative "utilities"
 require_relative "html/parser"
@@ -32,15 +34,20 @@ module Langsys
   class Client
     include Html::ClientSurface
     include RegistrationLane
+    include ClientMessages
 
     def initialize(api_key: nil, project_id: nil, api_url: nil, base_locale: nil, locale: nil,
                    locale_source: nil, cache: nil, cache_ttl: nil, timeout: nil,
-                   auto_flush: false, logger: nil, clock: nil)
+                   auto_flush: false, logger: nil, clock: nil, messages_category: nil)
       @config = Config.resolve(
         api_key: api_key, project_id: project_id, api_url: api_url,
         base_locale: base_locale, cache_ttl: cache_ttl, timeout: timeout
       )
       @logger = logger
+      # MSG-6: one category for server messages, identical on server and client.
+      @messages_category = [messages_category, ENV.fetch("LANGSYS_MESSAGES_CATEGORY", nil)]
+                           .find { |v| v && !v.empty? } || Messages::DEFAULT_CATEGORY
+      @message_warnings = Set.new
       @http = Http.new(@config.api_url, @config.api_key, timeout: @config.timeout)
       @cache = cache || Cache::File.new
       @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl, logger: @logger,

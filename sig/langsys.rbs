@@ -198,6 +198,10 @@ module Langsys
     def lookup_phrase: (String, ?category: String?, ?params: Hash[untyped, untyped]?, ?locale: String?, ?record: bool) -> String
     def catalog_block: (String?, String, ?locale: String?) -> Hash[String, untyped]?
     def project_base_locale: () -> String?
+    attr_reader messages_category: String
+    def render_message: (Hash[untyped, untyped], ?locale: String?) -> String
+    def emit_message: (code: String, template: String, ?params: Hash[untyped, untyped]?, ?field: String?) -> Hash[String, untyped]
+    def message_template_known?: (String) -> bool
     def resolve_request_locale: (?url: String?, ?cookie: String?, ?accept_language: String?) -> Hash[Symbol, untyped]
     def begin_request_scope: () -> RequestScope
     def end_request_scope: (RequestScope?) -> nil
@@ -295,6 +299,48 @@ module Langsys
   def self.begin_request_scope: () -> RequestScope
   def self.end_request_scope: (RequestScope?) -> nil
   def self.request_scope: [T] () { () -> T } -> T
+
+  module Messages
+    MARKER: Regexp
+    CODE: Regexp
+    CODES: Array[String]
+    SIZE_CODES: Hash[Symbol, Array[String]]
+    DEFAULT_CATEGORY: String
+    def self.markers: (String?) -> Array[String]
+    def self.fill: (String?, Hash[untyped, untyped]?) -> String
+    def self.scalar?: (untyped) -> bool
+    def self.entry: (code: String, template: String, ?params: Hash[untyped, untyped]?, ?field: String?) -> Hash[String, untyped]
+    def self.from_text: (String) -> Hash[String, String]
+    def self.size_code: (Symbol | String, Symbol | String) -> String
+    def self.envelope: (Array[Hash[String, untyped]], ?message: String, ?code: String) -> Hash[String, untyped]
+    def self.resolve: (untyped, ?key: String?, ?resolver: ^(untyped) -> untyped) -> Array[Hash[String, untyped]]
+    def self.dig: (untyped, String) -> untyped
+    def self.collect: (untyped, Array[Hash[String, untyped]]) -> Array[Hash[String, untyped]]
+    def self.normalize: (untyped) -> Hash[String, untyped]?
+    def self.sources: () -> Array[Source]
+
+    class TemplateCatalog
+      LABEL_MARKERS: Array[String]
+      FRAMEWORK_PLACEHOLDER: Regexp
+      BRACE: Regexp
+      attr_reader templates: Array[String]
+      attr_reader problems: Array[Hash[Symbol, untyped]]
+      def initialize: () -> void
+      def add: (String, ?source: String?, ?field: String?) -> self
+      def issue_for: (String) -> [String, String]?
+    end
+
+    class Source
+      attr_reader name: String
+      def initialize: (String) { (untyped) -> void } -> void
+      def collect: (TemplateCatalog) -> TemplateCatalog
+    end
+
+    module Command
+      def self.run: (sources: Array[Source], ?client: Client?, ?register: bool, ?out: untyped) -> Integer
+      def self.register_new: (Client, Array[String], untyped) -> void
+    end
+  end
 
   module Controls
     CODE_POINTS: Array[Integer]

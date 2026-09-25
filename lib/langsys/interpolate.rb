@@ -5,6 +5,7 @@ require "set"
 
 require_relative "cldr"
 require_relative "controls"
+require_relative "icu_fallback"
 
 module Langsys
   # Parameter interpolation with locale-aware CLDR formatting and an ICU subset.
@@ -41,6 +42,8 @@ module Langsys
     # threads, and a duplicated notice is the failure mode the rule exists to avoid.
     RECOVERY_NOTICES = Mutex.new
     RECOVERY_NOTICES_SEEN = Set.new
+    # ICU-6 dedup, the same (template, locale) pairing as ICU-4.
+    FAILURE_NOTICES_SEEN = Set.new
 
     # Render context threaded through the ICU walk. +defaulted+ collects the argument
     # names recovered on this render, for the ICU-4 notice.
@@ -67,9 +70,10 @@ module Langsys
           out = render(nodes, ctx, nil, 0, nil)
           note_recovery(template, locale, ctx.defaulted, logger)
           return out
-        rescue StandardError
-          # Malformed ICU (or an unexpected node) must never blow up a page.
-          return simple(template, params, locale)
+        rescue StandardError => e
+          # ICU-6: a formatter failure renders through our own branch selection, and warns.
+          note_failure(template, locale, e, logger)
+          return Fallback.render(template, params, locale)
         end
       end
       simple(template, params, locale)
@@ -94,6 +98,17 @@ module Langsys
         "#{locale}; rendered the `other` branch. A source phrase that does not ask for these is " \
         "normal — pass them in params to select a different branch."
       )
+    end
+
+    # ICU-6: a formatter failure is a defect in the phrase, so it warns at every log level,
+    # not only at debug as a missing argument does. Once per (template, locale).
+    def note_failure(template, locale, error, logger)
+      return if logger.nil?
+      return if RECOVERY_NOTICES.synchronize { FAILURE_NOTICES_SEEN.add?([template, locale]) }.nil?
+
+      logger.warn("langsys: the ICU formatter failed on #{template.inspect} for locale #{locale} " \
+                  "(#{error.class}: #{error.message}); rendered through the SDK's own branch selection. " \
+                  "The phrase needs fixing.")
     end
 
     # -- simple {name} interpolation -----------------------------------------

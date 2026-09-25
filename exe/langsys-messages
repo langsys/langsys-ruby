@@ -1,0 +1,23 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# MSG-7: list, and with --register register, every server-message template an app declares.
+#
+#   langsys-messages [--register] path/to/messages.rb ...
+#
+# Each file declares its sources:
+#
+#   Langsys::Messages.sources << Langsys::Messages::Source.new("Signup") do |catalog|
+#     catalog.add("The email is required.", field: "email")
+#   end
+#
+# Exits non-zero, naming the source, the field and the fix, for any template that cannot be
+# listed, so it belongs in CI. --register reads LANGSYS_API_KEY / LANGSYS_PROJECT_ID.
+require "langsys"
+
+register = ARGV.delete("--register")
+abort "usage: langsys-messages [--register] FILE..." if ARGV.empty?
+
+ARGV.each { |file| load File.expand_path(file) }
+client = register ? Langsys::Client.new : nil
+exit Langsys::Messages::Command.run(sources: Langsys::Messages.sources, client: client, register: !register.nil?)
