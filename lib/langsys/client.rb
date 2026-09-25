@@ -229,6 +229,8 @@ module Langsys
     # catalog. A snapshot the loader refuses raises here, when the client is built.
     def seed_snapshot(path)
       snapshot = Snapshot.load(path)
+      @snapshot_base = snapshot.base_locale
+      @snapshot_locales = snapshot.locales
       snapshot.locales.each { |loc| @catalog.seed_locale(loc, snapshot.catalog(loc) || {}) }
     end
     private :seed_snapshot

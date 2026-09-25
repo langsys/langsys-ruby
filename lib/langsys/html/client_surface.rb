@@ -62,10 +62,20 @@ module Langsys
       end
 
       # SRV-6 against this project's locales (base and targets, from authorization).
+      # With authorization unavailable, a preloaded snapshot names the locales this client can
+      # actually serve, so an offline first request is not forced to the base language.
       def resolve_request_locale(url: nil, cookie: nil, accept_language: nil)
         project = authorize_quietly
-        base = project&.base_locale || @config.base_locale || ""
-        supported = [base, *project&.target_locales]
+        if project
+          base = project.base_locale
+          supported = [base, *project.target_locales]
+        elsif @snapshot_locales
+          base = @snapshot_base
+          supported = [base, *@snapshot_locales]
+        else
+          base = @config.base_locale || ""
+          supported = [base]
+        end
         Locale.resolve_request_locale(supported: supported, base: base, url: url, cookie: cookie,
                                       accept_language: accept_language)
       end
@@ -91,7 +101,7 @@ module Langsys
 
       # The project's base locale from authorization, or nil when it cannot be read.
       def project_base_locale
-        authorize_quietly&.base_locale
+        authorize_quietly&.base_locale || @snapshot_base
       end
 
       # Internal (used by the HTML page translator): look up a stored content block by its id.

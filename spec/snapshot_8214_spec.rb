@@ -187,6 +187,35 @@ RSpec.describe "spec 8.2.14 snapshots (SNAP)" do
       expect(sdk.pending_phrases.map { |p| p["phrase"] }).to eq(["Brand new", "Pending"])
     end
 
+    describe "when authorization is unavailable, the snapshot names the locales it can serve" do
+      before { stub_request(:get, %r{/api/authorize-project}).to_return(status: 500, body: "") }
+
+      it "resolves a request locale the snapshot carries (SRV-6)" do
+        expect(seeded_client.resolve_request_locale(url: "es-ES")).to eq(locale: "es-es", source: :url, vary: [])
+      end
+
+      it "still refuses a locale the snapshot does not carry" do
+        expect(seeded_client.resolve_request_locale(url: "fr-FR")).to eq(locale: "en-us", source: nil, vary: [])
+      end
+
+      it "gives the resolved-root decision the snapshot's base locale (GATE-10)" do
+        expect(seeded_client.resolved_locale("es-ES")).to eq("es-es")
+        expect(seeded_client.resolved_locale("en-US")).to be_nil
+      end
+    end
+
+    it "prefers authorization whenever it answers (control)" do
+      stub_request(:get, %r{/api/authorize-project})
+        .to_return(status: 200, headers: { "Content-Type" => "application/json" },
+                   body: JSON.generate(authorize_body.tap do |b|
+                     b["data"]["base_locale"] = "en-us"
+                     b["data"]["target_locales"] = ["fr-fr"]
+                   end))
+      sdk = seeded_client
+      expect(sdk.resolve_request_locale(url: "fr-FR")[:locale]).to eq("fr-fr")
+      expect(sdk.resolve_request_locale(url: "es-ES")[:source]).to be_nil
+    end
+
     it "refuses a bad snapshot when the client is built" do
       File.write(path, File.read(path).sub("Guardar", "Salvar"))
       expect { seeded_client }.to raise_error(Langsys::ConfigurationError, /checksum/)
