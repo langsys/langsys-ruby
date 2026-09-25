@@ -9,6 +9,10 @@ module Langsys
   def self.normalize_locale: (String?) -> String
   def self.parse_accept_language: (String?) -> Array[String]
   def self.detect_preferred_locale: (?String?, ?Array[String]?) -> String?
+
+  module Locale
+    def self.resolve_request_locale: (supported: Array[String], base: String, ?url: String?, ?cookie: String?, ?accept_language: String?) -> Hash[Symbol, untyped]
+  end
   def self.interpolate: (String, Hash[untyped, untyped]?, ?String) -> String
   def self.icu?: (String) -> bool
   def self.generate_custom_id: (String?, Array[String]) -> String
@@ -194,6 +198,10 @@ module Langsys
     def lookup_phrase: (String, ?category: String?, ?params: Hash[untyped, untyped]?, ?locale: String?, ?record: bool) -> String
     def catalog_block: (String?, String, ?locale: String?) -> Hash[String, untyped]?
     def project_base_locale: () -> String?
+    def resolve_request_locale: (?url: String?, ?cookie: String?, ?accept_language: String?) -> Hash[Symbol, untyped]
+    def begin_request_scope: () -> RequestScope
+    def end_request_scope: (RequestScope?) -> nil
+    def request_scope: [T] () { () -> T } -> T
 
     def countries: (?String?) -> Array[Country]
     def dial_codes: (?String?) -> Array[DialCode]
@@ -270,6 +278,23 @@ module Langsys
   end
 
   # -- interpolation --------------------------------------------------------
+
+  class RequestScope
+    KEY: Symbol
+    attr_reader previous: RequestScope?
+    def initialize: (RequestScope?) -> void
+    def ended?: () -> bool
+    def end!: () -> self
+    def self.fiber_storage?: () -> bool
+    def self.current: () -> RequestScope?
+    def self.current=: (RequestScope?) -> RequestScope?
+    def self.begin: () -> RequestScope
+    def self.end: (RequestScope?) -> nil
+  end
+
+  def self.begin_request_scope: () -> RequestScope
+  def self.end_request_scope: (RequestScope?) -> nil
+  def self.request_scope: [T] () { () -> T } -> T
 
   module Controls
     CODE_POINTS: Array[Integer]

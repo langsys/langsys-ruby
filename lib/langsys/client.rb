@@ -43,7 +43,8 @@ module Langsys
       @logger = logger
       @http = Http.new(@config.api_url, @config.api_key, timeout: @config.timeout)
       @cache = cache || Cache::File.new
-      @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl, logger: @logger)
+      @catalog = CatalogStore.new(@http, @config.project_id, @cache, ttl: @config.cache_ttl, logger: @logger,
+                                                                     clock: clock)
 
       seed = Locale.canonicalize_locale(locale || @config.base_locale || "")
       if locale_source

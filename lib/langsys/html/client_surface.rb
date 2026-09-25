@@ -67,6 +67,15 @@ module Langsys
         block.is_a?(Hash) ? block : nil
       end
 
+      # SRV-6 against this project's locales (base and targets, from authorization).
+      def resolve_request_locale(url: nil, cookie: nil, accept_language: nil)
+        project = authorize_quietly
+        base = project&.base_locale || @config.base_locale || ""
+        supported = [base, *project&.target_locales]
+        Locale.resolve_request_locale(supported: supported, base: base, url: url, cookie: cookie,
+                                      accept_language: accept_language)
+      end
+
       # The project's base locale from authorization, or nil when it cannot be read.
       def project_base_locale
         authorize_quietly&.base_locale

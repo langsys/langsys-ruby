@@ -37,12 +37,19 @@ module Langsys
 
     # REG-3: the end-of-context flush. Best-effort by construction — it must never raise
     # into a shutdown path, and it cannot be relied on (no hook runs on an OOM kill).
+    # SRV-3 client-side delegates; scopes are module-level (see RequestScope).
+    def begin_request_scope = Langsys.begin_request_scope
+
+    def end_request_scope(scope) = Langsys.end_request_scope(scope)
+
+    def request_scope(&block) = Langsys.request_scope(&block)
+
     def flush_on_shutdown
       pending = @discovery.phrase_count + @discovery.block_count
       # The backoff is bypassed for this one attempt. A backed-off queue at shutdown would
       # otherwise be dropped without a request and without a line in the log, and unlike a
       # browser there is no later page in this session to recover on.
-      result = flush_pending(ignore_backoff: true)
+      result = flush_pending(ignore_backoff: true, release_all: true)
       return result if result["success"] || pending.zero?
 
       @logger&.warn("langsys: abandoning #{pending} unregistered item(s) at shutdown " \
@@ -61,7 +68,7 @@ module Langsys
     # path, it always logs, and it never returns a success-shaped result for work that did
     # not happen — a skipped write reports +success: false+ with a reason, because a caller
     # that correctly checks the return value must not be told it worked.
-    def flush_pending(refresh: false, ignore_backoff: false)
+    def flush_pending(refresh: false, ignore_backoff: false, release_all: false)
       return empty_result(success: true) unless @discovery.pending?
 
       # REG-7: exactly one send in flight. A second caller is told so rather than being
@@ -92,7 +99,7 @@ module Langsys
           return empty_result(success: false, reason: "not_write_enabled")
         end
 
-        send_snapshot
+        send_snapshot(release_all: release_all)
       ensure
         @discovery.end_send
       end
@@ -145,7 +152,7 @@ module Langsys
 
     # REG-6: send exactly the snapshot, and let the success handler clear exactly the
     # snapshot. Anything queued while the request was open stays queued.
-    def send_snapshot
+    def send_snapshot(release_all: false)
       begin
         limit = registrar.batch_limit
       rescue Langsys::Error => e
@@ -155,9 +162,11 @@ module Langsys
         return empty_result(success: false, reason: "send_failed")
       end
 
-      snapshot = @discovery.snapshot(limit)
+      snapshot = @discovery.snapshot(limit, release_all: release_all)
       phrases = snapshot.phrase_keys.size
       blocks = snapshot.block_ids.size
+      # SRV-3: everything queued is held by a request still being served. Nothing was sent.
+      return empty_result(success: false, reason: "held_by_request") if phrases.zero? && blocks.zero?
 
       begin
         snapshot.items.each { |chunk| registrar.register_items(chunk) }

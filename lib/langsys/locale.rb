@@ -106,5 +106,37 @@ module Langsys
 
       canonicalize_locale(preferences.first)
     end
+
+    # SRV-6: the request locale is the first usable candidate from the URL, then a cookie or
+    # session value, then Accept-Language negotiated against the project's locales, and
+    # otherwise the base locale. A candidate is used only when it names a locale the project
+    # serves, so nothing a visitor typed is ever echoed or worth persisting. +vary+
+    # names every header the choice read: the URL is the cache key already, so it adds none.
+    #
+    # Returns {locale:, source: :url | :cookie | :accept_language | nil, vary: [...]}.
+    def resolve_request_locale(supported:, base:, url: nil, cookie: nil, accept_language: nil)
+      served = Array(supported).map { |s| normalize_locale(s) }.reject(&:empty?)
+      vary = []
+      { url: url, cookie: cookie }.each do |source, candidate|
+        next if blank?(candidate)
+
+        vary << "Cookie" if source == :cookie
+        match = validated(candidate, served)
+        return { locale: match, source: source, vary: vary } if match
+      end
+      unless blank?(accept_language)
+        vary << "Accept-Language"
+        match = find_best_locale_match(parse_accept_language(accept_language), served)
+        return { locale: normalize_locale(match), source: :accept_language, vary: vary } if match
+      end
+      { locale: normalize_locale(base), source: nil, vary: vary }
+    end
+
+    def validated(candidate, served)
+      normalized = normalize_locale(candidate)
+      served.include?(normalized) ? normalized : nil
+    end
+
+    def blank?(value) = value.nil? || value.to_s.strip.empty?
   end
 end

@@ -83,3 +83,8 @@ def stub_authorize(key_type: "read", write_enabled: :omit)
                body: JSON.generate(authorize_body(key_type: key_type, write_enabled: write_enabled)),
                headers: { "Content-Type" => "application/json" })
 end
+
+# A scope left open by one example must not hold another example's misses (SRV-3).
+RSpec.configure do |config|
+  config.after { Langsys::RequestScope.current = nil }
+end

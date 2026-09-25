@@ -72,15 +72,25 @@ module Langsys
   # in-process hash (fast, per-client); tier 2 is the pluggable cache backend (survives
   # processes). A miss falls through to nova and populates both tiers.
   class CatalogStore
-    def initialize(http, project_id, cache, ttl: 3600, logger: nil)
+    # CACHE-2: REG-8's clock on the read side.
+    FAILURE_BASE = 3.0
+    FAILURE_CEILING = 300.0
+
+    def initialize(http, project_id, cache, ttl: 3600, logger: nil, clock: nil)
       @http = http
       @project_id = project_id
       @cache = cache
       @ttl = ttl
       @logger = logger
+      @clock = clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
       @memory = {}
       @write_enabled = nil
       @write_enabled_at = nil
+      # CACHE-2: per locale (this store is per project), held by this long-lived object and
+      # never written to the shared cache: {locale => [retry_at, delay]}.
+      @failures = {}
+      @locks = {}
+      @guard = Mutex.new
     end
 
     # The write decision as of the most recent catalog response (GATE-1). +nil+ means the
@@ -107,12 +117,20 @@ module Langsys
         end
       end
 
-      catalog = fetch(loc)
-      return nil if catalog.nil?
+      # One fetch per locale at a time; a lookup that waited finds the answer the first one
+      # stored, or the failure it recorded.
+      lock_for(loc).synchronize do
+        return @memory[loc] if use_cache && @memory[loc]
+        return nil if failing?(loc)
 
-      @memory[loc] = catalog
-      @cache.set(key(loc), catalog, @ttl)
-      catalog
+        catalog = fetch(loc)
+        return record_failure(loc) if catalog.nil?
+
+        @guard.synchronize { @failures.delete(loc) }
+        @memory[loc] = catalog
+        @cache.set(key(loc), catalog, @ttl)
+        catalog
+      end
     end
 
     # GATE-3: drop the recorded decision without touching cached catalog data.
@@ -134,6 +152,25 @@ module Langsys
 
     private
 
+    def lock_for(locale)
+      @guard.synchronize { @locks[locale] ||= Mutex.new }
+    end
+
+    # Inside the window a lookup answers from source text without fetching (CACHE-2).
+    def failing?(locale)
+      retry_at, = @guard.synchronize { @failures[locale] }
+      !retry_at.nil? && @clock.call < retry_at
+    end
+
+    def record_failure(locale)
+      @guard.synchronize do
+        _, delay = @failures[locale]
+        delay = delay.nil? ? FAILURE_BASE : [delay * 2, FAILURE_CEILING].min
+        @failures[locale] = [@clock.call + delay, delay]
+      end
+      nil
+    end
+
     def key(locale)
       "translations_#{@project_id}_#{locale}"
     end
@@ -149,6 +186,11 @@ module Langsys
         @write_enabled = nil
         @write_enabled_at = nil
       end
+      if response["status"] == false
+        @logger&.warn("langsys: catalog request for #{locale} answered status:false; degrading to source text")
+        return nil
+      end
+
       data = response["data"]
       # GATE-4: the cached artifact is `data` only — the envelope carrying the decision
       # is never what we hand to the cache.

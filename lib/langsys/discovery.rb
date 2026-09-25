@@ -2,6 +2,8 @@
 
 require "set"
 
+require_relative "request_scope"
+
 module Langsys
   # The discovery queue and the reliability machinery around it (REG-2/3/6/7/8, GATE-5).
   #
@@ -38,6 +40,7 @@ module Langsys
       @dirty_since = nil
       @phrases = {}
       @blocks = {}
+      @block_recorders = {}
       # GATE-5: written only after the server confirms acceptance. Namespaced by project
       # so a marker can never answer for a different one.
       @registered = Set.new
@@ -54,7 +57,7 @@ module Langsys
       key = [category, phrase]
       return if @registered.include?(marker(category, phrase))
 
-      @phrases[key] = true
+      (@phrases[key] ||= Set.new) << RequestScope.current
       touch
     end
 
@@ -64,6 +67,7 @@ module Langsys
       @blocks[custom_id] ||= {
         "content" => html, "category" => category, "custom_id" => custom_id, "phrases" => phrases
       }
+      (@block_recorders[custom_id] ||= Set.new) << RequestScope.current
       touch
     end
 
@@ -76,6 +80,7 @@ module Langsys
     def clear
       @phrases.clear
       @blocks.clear
+      @block_recorders.clear
       @last_activity = nil
       @dirty_since = nil
     end
@@ -138,9 +143,13 @@ module Langsys
     # Freeze what is about to be sent. Everything queued after this point stays in the
     # live queue and is sent by a later flush; nothing about the response is allowed to
     # touch it.
-    def snapshot(batch_limit)
-      phrase_keys = @phrases.keys.dup
-      block_ids = @blocks.keys.dup
+    #
+    # SRV-3: only what no open request is holding. An item is released when it was recorded
+    # outside any scope, or when a scope that recorded it has ended; +release_all+ is the
+    # shutdown flush, which holds nothing back.
+    def snapshot(batch_limit, release_all: false)
+      phrase_keys = @phrases.select { |_, recorders| release_all || released?(recorders) }.keys
+      block_ids = @blocks.keys.select { |id| release_all || released?(@block_recorders[id]) }
 
       items = phrase_keys.map do |category, phrase|
         { "phrase" => phrase, "category" => category == UNCATEGORIZED ? nil : category }
@@ -166,6 +175,7 @@ module Langsys
       snapshot.block_ids.each do |id|
         @registered << marker(snapshot.block_categories[id], id)
         @blocks.delete(id)
+        @block_recorders.delete(id)
       end
       return unless @phrases.empty? && @blocks.empty?
 
@@ -174,6 +184,10 @@ module Langsys
     end
 
     private
+
+    def released?(recorders)
+      recorders.nil? || recorders.any? { |scope| scope.nil? || scope.ended? }
+    end
 
     def touch
       now = @clock.call
