@@ -204,7 +204,7 @@ RSpec.describe "contract rows (spec 8.2.12)", contract: true do
       sdk = contract_client(key: "ipw")
       sdk.request_scope do
         sdk.t("Page miss", category: "UI")
-        sdk.emit_message(code: "invalid", template: "Emitted {n}.", params: { n: 1 })
+        sdk.emit_message(template: "Emitted {n}.", params: { n: 1 })
       end
       expect(sdk.can_write?).to be(false)
       world(allow_ip: true)

@@ -205,9 +205,11 @@ module Langsys
     attr_reader migration: Migration?
     attr_reader messages_category: String
     def render_message: (Hash[untyped, untyped], ?locale: String?) -> String
-    def emit_message: (code: String, template: String, ?params: Hash[untyped, untyped]?, ?field: String?) -> Hash[String, untyped]
+    def emit_message: (template: String, ?params: Hash[untyped, untyped]?, ?field: String?, ?code: untyped) -> Hash[String, untyped]
     def message_template_known?: (String) -> bool
-    def resolve_request_locale: (?url: String?, ?cookie: String?, ?accept_language: String?) -> Hash[Symbol, untyped]
+    def resolve_request_locale: (?framework: String?, ?url: String?, ?cookie: String?, ?accept_language: String?) -> Hash[Symbol, untyped]
+    def framework_locale: (String?) -> String?
+    def served_locales: () -> [String, Array[String], Hash[String, String]]
     def begin_request_scope: () -> RequestScope
     def end_request_scope: (RequestScope?) -> nil
     def request_scope: [T] () { () -> T } -> T
@@ -307,32 +309,28 @@ module Langsys
 
   module Messages
     MARKER: Regexp
-    CODE: Regexp
-    CODES: Array[String]
-    SIZE_CODES: Hash[Symbol, Array[String]]
+    PIECES: Array[String]
     DEFAULT_CATEGORY: String
+    DEFAULT_KEY: String
     def self.markers: (String?) -> Array[String]
     def self.fill: (String?, Hash[untyped, untyped]?) -> String
     def self.scalar?: (untyped) -> bool
-    def self.entry: (code: String, template: String, ?params: Hash[untyped, untyped]?, ?field: String?) -> Hash[String, untyped]
+    def self.entry: (template: String, ?params: Hash[untyped, untyped]?, ?field: String?, ?code: untyped) -> Hash[String, untyped]
     def self.from_text: (String) -> Hash[String, String]
-    def self.size_code: (Symbol | String, Symbol | String) -> String
-    def self.envelope: (Array[Hash[String, untyped]], ?message: String, ?code: String) -> Hash[String, untyped]
-    def self.resolve: (untyped, ?key: String?, ?resolver: ^(untyped) -> untyped) -> Array[Hash[String, untyped]]
+    def self.attach: (Hash[String, untyped], Array[Hash[String, untyped]], ?key: String | Symbol) -> Hash[String, untyped]
+    def self.resolve: (untyped, ?key: String?, ?resolver: (^(untyped) -> untyped)?, ?names: Hash[String, String]) -> Array[Hash[String, untyped]]
     def self.dig: (untyped, String) -> untyped
-    def self.collect: (untyped, Array[Hash[String, untyped]]) -> Array[Hash[String, untyped]]
-    def self.normalize: (untyped) -> Hash[String, untyped]?
+    def self.collect: (untyped, Hash[String, String], Array[Hash[String, untyped]]) -> Array[Hash[String, untyped]]
+    def self.normalize: (untyped, ?Hash[String, String]) -> Hash[String, untyped]?
     def self.sources: () -> Array[Source]
 
     class TemplateCatalog
-      LABEL_MARKERS: Array[String]
-      FRAMEWORK_PLACEHOLDER: Regexp
-      BRACE: Regexp
+      RAILS_LABEL_PLACEHOLDERS: Array[Regexp]
       attr_reader templates: Array[String]
       attr_reader problems: Array[Hash[Symbol, untyped]]
-      def initialize: () -> void
+      def initialize: (?label_placeholders: Array[String | Regexp]) -> void
       def add: (String, ?source: String?, ?field: String?) -> self
-      def problem: (source: String?, issue: String, fix: String, ?field: String?) -> self
+      def problem: (source: String?, issue: String, fix: String, ?field: String?, ?advice: bool) -> self
       def issue_for: (String) -> [String, String]?
     end
 
@@ -343,7 +341,7 @@ module Langsys
     end
 
     module Command
-      def self.run: (sources: Array[Source], ?client: Client?, ?register: bool, ?out: untyped) -> Integer
+      def self.run: (sources: Array[Source], ?client: Client?, ?register: bool, ?strict: bool, ?out: untyped, ?catalog: TemplateCatalog) -> Integer
       def self.register_new: (Client, Array[String], untyped) -> void
     end
   end

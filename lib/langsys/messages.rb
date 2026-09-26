@@ -4,26 +4,15 @@ module Langsys
   # Server messages (spec MSG family). A server registers the templates of its validation errors
   # and system messages ahead of time, because no visitor's SDK ever sees them rendered.
   #
-  # An entry is { field?, code, message, template, params? }. The template is a whole sentence in
-  # the source language with everything translatable written in; {name} markers carry only values
-  # that are not translatable (a number, a date, raw input), and message is the template filled.
-  # The envelope around the entries is the app's; this module ships the langsys default and reads
-  # entries wherever a body carries them.
+  # What translation needs is the framework's own sentence, unfilled (the template), and the
+  # params that fill its {name} markers; message is the filled template, the fallback a client
+  # shows. Everything around that pair is the framework's and passes through unchanged: its code
+  # for the failure, its field path, and the error body the entries are attached to.
   module Messages
     MARKER = /\{([a-z][a-z0-9_]*)\}/
-    CODE = /\A[a-z][a-z0-9]*(?:_[a-z0-9]+)*\z/
-
-    # MSG-2: the shared vocabulary. A code is branched on, never used to choose text, and
-    # retired rather than renamed.
-    CODES = %w[required invalid_type invalid_format invalid_option invalid_date not_found already_taken mismatch
-               too_short too_long too_small too_large too_few too_many not_allowed already_member not_member
-               already_owner expired not_available invalid].freeze
-
-    SIZE_CODES = {
-      string: %w[too_short too_long], number: %w[too_small too_large], list: %w[too_few too_many]
-    }.freeze
-
+    PIECES = %w[template params message field code].freeze
     DEFAULT_CATEGORY = "Errors"
+    DEFAULT_KEY = "messages"
 
     module_function
 
@@ -47,50 +36,40 @@ module Langsys
       value.is_a?(String) || value.is_a?(Numeric) || value == true || value == false
     end
 
-    # A well-formed entry. params is kept only for the template's own markers, and omitted
-    # when it has none; numbers stay numbers.
-    def entry(code:, template:, params: nil, field: nil)
-      unless code.to_s.match?(CODE)
-        raise ArgumentError,
-              "langsys: message code #{code.inspect} is not a snake_case slug"
-      end
-
+    # An entry: the template and the params for its own markers (omitted when it has none,
+    # numbers kept as numbers), message filled from them, and the framework's field and code
+    # passed through unchanged when it has them (MSG-1, MSG-2).
+    def entry(template:, params: nil, field: nil, code: nil)
       names = markers(template)
       kept = (params || {}).each_with_object({}) do |(key, value), out|
         out[key.to_s] = value if names.include?(key.to_s)
       end
-      result = {}
-      result["field"] = field.to_s unless field.nil? || field.to_s.empty?
-      result.merge!("code" => code.to_s, "message" => fill(template, kept), "template" => template.to_s)
+      result = { "template" => template.to_s }
       result["params"] = kept unless names.empty?
+      result["message"] = fill(template, kept)
+      result["field"] = field.to_s unless field.nil? || field.to_s.empty?
+      result["code"] = code unless code.nil?
       result
     end
 
-    # A failure that arrives as text only (MSG-9's pieces for a binding's normalizer).
+    # MSG-9: a failure that arrives as finished text registers as that text, with no params.
     def from_text(text)
-      { "code" => "invalid", "message" => text.to_s, "template" => text.to_s }
+      { "template" => text.to_s, "message" => text.to_s }
     end
 
-    # MSG-2: size codes by the field's type and the bound that failed.
-    def size_code(type, bound)
-      pair = SIZE_CODES.fetch(type.to_sym)
-      bound.to_sym == :lower ? pair[0] : pair[1]
+    # MSG-1: the framework's native error body, unchanged, with the entries attached under +key+.
+    def attach(body, entries, key: DEFAULT_KEY)
+      body.merge(key.to_s => entries)
     end
 
-    # MSG-1: the langsys default envelope.
-    def envelope(entries, message: "The request failed validation.", code: "validation_failed")
-      { "status" => false,
-        "error" => { "code" => code, "message" => message, "template" => message, "errors" => entries } }
-    end
-
-    # MSG-1: every entry in +body+, in document order, wherever it sits. +key+ narrows the
-    # search to a dotted path; +resolver+ maps an app's native failures to entries instead.
+    # MSG-1: every entry in +body+, in document order. +key+ narrows the search to a dotted path,
+    # +names+ maps renamed pieces, and +resolver+ maps an app's native failures to entries instead.
     # An entry's own params are never searched.
-    def resolve(body, key: nil, resolver: nil)
-      return Array(resolver.call(body)).filter_map { |candidate| normalize(candidate) } if resolver
+    def resolve(body, key: nil, resolver: nil, names: {})
+      return Array(resolver.call(body)).filter_map { |candidate| normalize(candidate, names) } if resolver
 
       node = key.nil? ? body : dig(body, key)
-      node.nil? ? [] : collect(node, [])
+      node.nil? ? [] : collect(node, names, [])
     end
 
     def dig(body, key)
@@ -103,41 +82,50 @@ module Langsys
       end
     end
 
-    def collect(node, out)
+    def collect(node, names, out)
       case node
-      when Array then node.each { |child| collect(child, out) }
+      when Array then node.each { |child| collect(child, names, out) }
       when Hash
-        found = normalize(node)
+        found = normalize(node, names)
         out << found if found
-        node.each { |name, child| collect(child, out) unless found && name.to_s == "params" }
+        params_key = names.fetch("params", "params")
+        node.each { |name, child| collect(child, names, out) unless found && name.to_s == params_key }
       end
       out
     end
 
-    def normalize(candidate)
+    # An entry is an object with a string template beside a message or params; anything else is
+    # not looked up (a client shows its message).
+    def normalize(candidate, names = {})
       return nil unless candidate.is_a?(Hash)
 
-      pieces = %w[code message template].to_h { |k| [k, candidate[k] || candidate[k.to_sym]] }
-      return nil unless pieces.values.all?(String)
+      read = ->(piece) { candidate[names.fetch(piece, piece)] || candidate[names.fetch(piece, piece).to_sym] }
+      template = read.call("template")
+      message = read.call("message")
+      params = read.call("params")
+      return nil unless template.is_a?(String) && (message.is_a?(String) || params.is_a?(Hash))
 
-      field = candidate["field"] || candidate[:field]
-      params = candidate.key?("params") ? candidate["params"] : candidate[:params]
-      result = {}
-      result["field"] = field if field.is_a?(String) && !field.empty?
-      result.merge!(pieces)
+      result = { "template" => template }
       result["params"] = params unless params.nil?
+      result["message"] = message.is_a?(String) ? message : fill(template, params)
+      field = read.call("field")
+      result["field"] = field if field.is_a?(String) && !field.empty?
+      code = read.call("code")
+      result["code"] = code unless code.nil?
       result
     end
 
-    # MSG-7/MSG-11: the template list a server can emit, checked as each template is added.
+    # MSG-7/MSG-11: the template list a server can emit. A template that still holds one of its
+    # framework's own label placeholders is refused, because the label belongs written in. The
+    # default is Rails' (%{attribute}, %{model}, in either interpolation form); a binding for
+    # another framework names its own.
     class TemplateCatalog
-      LABEL_MARKERS = %w[attribute field label other values].freeze
-      FRAMEWORK_PLACEHOLDER = /(?<![\w:]):[a-z][a-z_]*/
-      BRACE = /\{[^{}]*\}/
+      RAILS_LABEL_PLACEHOLDERS = [/%[{<](?:attribute|model)[}>]/].freeze
 
       attr_reader :templates, :problems
 
-      def initialize
+      def initialize(label_placeholders: RAILS_LABEL_PLACEHOLDERS)
+        @label_placeholders = Array(label_placeholders)
         @templates = []
         @problems = []
       end
@@ -145,35 +133,26 @@ module Langsys
       def add(template, source: nil, field: nil)
         issue = issue_for(template.to_s)
         if issue
-          @problems << { source: source, field: field, issue: issue[0], fix: issue[1] }
+          problem(source: source, field: field, issue: issue[0], fix: issue[1])
         elsif !@templates.include?(template)
           @templates << template
         end
         self
       end
 
-      # A problem that is not a bad template: a validated field with no label (MSG-10), or a
-      # custom rule whose templates the app has not declared. The command names it and exits 1.
-      def problem(source:, issue:, fix:, field: nil)
-        @problems << { source: source, field: field, issue: issue, fix: fix }
+      # Reported by the listing command. A problem (a message it cannot list ahead of time) fails
+      # the command only under strict; advice (a field with no declared label, MSG-10) never does.
+      def problem(source:, issue:, fix:, field: nil, advice: false)
+        @problems << { source: source, field: field, issue: issue, fix: fix, advice: advice }
         self
       end
 
       def issue_for(template)
-        if template.include?("{{") || template.match?(FRAMEWORK_PLACEHOLDER)
-          placeholder = template[/\{\{[^}]*\}\}/] || template[FRAMEWORK_PLACEHOLDER]
-          return ["framework placeholder #{placeholder} left in the template",
-                  "write the value into the sentence, or use a {name} marker for a non-translatable value"]
-        end
-        label = Messages.markers(template).find { |name| LABEL_MARKERS.include?(name) }
-        if label
-          return ["marker {#{label}} carries a label", "write the label into the sentence: one template per label"]
-        end
+        found = @label_placeholders.lazy.map { |p| p.is_a?(Regexp) ? template[p] : (p if template.include?(p)) }
+                                   .find(&:itself)
+        return nil if found.nil?
 
-        odd = template.scan(BRACE).find { |brace| !brace.match?(/\A#{MARKER.source}\z/o) }
-        return ["#{odd} is not a {name} marker", "markers are {lower_snake_case} only"] if odd
-
-        nil
+        ["label placeholder #{found} left in the template", "write the field's label into the sentence"]
       end
     end
 
@@ -192,8 +171,8 @@ module Langsys
         recorder.define_singleton_method(:add) do |template, field: nil|
           catalog.add(template, source: source, field: field)
         end
-        recorder.define_singleton_method(:problem) do |issue:, fix:, field: nil|
-          catalog.problem(source: source, field: field, issue: issue, fix: fix)
+        recorder.define_singleton_method(:problem) do |issue:, fix:, field: nil, advice: false|
+          catalog.problem(source: source, field: field, issue: issue, fix: fix, advice: advice)
         end
         @block.call(recorder)
         catalog
@@ -204,20 +183,20 @@ module Langsys
       @sources ||= []
     end
 
-    # MSG-7: list every template the sources declare, register them with +register+, and exit
-    # non-zero naming each one that cannot be listed.
+    # MSG-7: list every template the sources declare, register them with +register+, and report
+    # what cannot be listed. Exit 0 unless +strict+ and a problem that is not advice was reported.
     module Command
       module_function
 
-      def run(sources:, client: nil, register: false, out: $stdout)
-        catalog = TemplateCatalog.new
+      def run(sources:, client: nil, register: false, strict: false, out: $stdout, catalog: TemplateCatalog.new)
         sources.each { |source| source.collect(catalog) }
         catalog.templates.each { |template| out.puts "✓ #{template}" }
         catalog.problems.each do |p|
-          out.puts "✗ #{[p[:source], p[:field]].compact.join('.')}: #{p[:issue]} — #{p[:fix]}"
+          mark = p[:advice] ? "!" : "✗"
+          out.puts "#{mark} #{[p[:source], p[:field]].compact.join('.')}: #{p[:issue]} — #{p[:fix]}"
         end
         register_new(client, catalog.templates, out) if register && client
-        catalog.problems.empty? ? 0 : 1
+        strict && catalog.problems.any? { |p| !p[:advice] } ? 1 : 0
       end
 
       def register_new(client, templates, out)

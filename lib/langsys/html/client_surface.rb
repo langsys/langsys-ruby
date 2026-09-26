@@ -62,22 +62,47 @@ module Langsys
       end
 
       # SRV-6 against this project's locales (base and targets, from authorization).
-      # With authorization unavailable, a preloaded snapshot names the locales this client can
-      # actually serve, so an offline first request is not forced to the base language.
-      def resolve_request_locale(url: nil, cookie: nil, accept_language: nil)
-        project = authorize_quietly
-        if project
-          base = project.base_locale
-          supported = [base, *project.target_locales]
-        elsif @snapshot_locales
-          base = @snapshot_base
-          supported = [base, *@snapshot_locales]
-        else
-          base = @config.base_locale || ""
-          supported = [base]
-        end
+      # SRV-6: where the framework or the app already resolved the request's locale, pass it as
+      # +framework+ and it is served, mapped to the project's form and validated, with no Vary;
+      # only where nothing resolved it does the SDK resolve it itself.
+      def resolve_request_locale(framework: nil, url: nil, cookie: nil, accept_language: nil)
+        chosen = framework_locale(framework)
+        return { locale: chosen, source: :framework, vary: [] } if chosen
+
+        base, supported, = served_locales
         Locale.resolve_request_locale(supported: supported, base: base, url: url, cookie: cookie,
                                       accept_language: accept_language)
+      end
+
+      # SRV-6: the locale a framework resolved (Rails' I18n.locale), in the project's form:
+      # es-ES and es_ES are es-es, a bare language is the project's default locale for it, and a
+      # locale the project does not serve is the base. nil when the framework resolved nothing.
+      def framework_locale(value)
+        return nil if value.nil? || value.to_s.strip.empty?
+
+        base, supported, defaults = served_locales
+        served = supported.map { |l| Locale.normalize_locale(l) }
+        wanted = Locale.normalize_locale(value)
+        unless wanted.include?("-")
+          default = defaults.find { |lang, _| lang.to_s.casecmp?(wanted) }&.last
+          wanted = default ? Locale.normalize_locale(default) : served.find { |l| l.split("-").first == wanted }
+        end
+        served.include?(wanted) ? wanted : Locale.normalize_locale(base)
+      end
+
+      # [base, supported, default_locales] from authorization; while it is unavailable, from a
+      # preloaded snapshot, which names the locales this client can actually serve; otherwise
+      # the configured base alone.
+      def served_locales
+        project = authorize_quietly
+        if project
+          [project.base_locale, [project.base_locale, *project.target_locales], project.default_locales || {}]
+        elsif @snapshot_locales
+          [@snapshot_base, [@snapshot_base, *@snapshot_locales], {}]
+        else
+          base = @config.base_locale || ""
+          [base, [base], {}]
+        end
       end
 
       # SNAP-1: the flat catalog GET /translations serves for +locale+, uncached and unfiltered.

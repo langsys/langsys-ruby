@@ -22,8 +22,8 @@ module Langsys
     # MSG-8: build the entry a server sends and, when the catalog has not listed its template,
     # record it for registration on the ordinary flush path, after the response when a request
     # scope is open, and only on a key that may write. Never blocks the request.
-    def emit_message(code:, template:, params: nil, field: nil)
-      entry = Messages.entry(code: code, template: template, params: params, field: field)
+    def emit_message(template:, params: nil, field: nil, code: nil)
+      entry = Messages.entry(template: template, params: params, field: field, code: code)
       catalog = @catalog.get(effective_locale)
       return entry if catalog.nil? # WIRE-4: no catalog, record nothing
 

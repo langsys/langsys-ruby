@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+# Rails' own %{attribute} placeholders are test data here, not Ruby format strings.
+# rubocop:disable Style/FormatStringToken
+
 require "spec_helper"
 require "logger"
 require "stringio"
@@ -55,81 +58,108 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
     end
   end
 
-  describe "MSG-1 — four fixed pieces; the envelope is the app's" do
-    let(:entry) { Langsys::Messages.entry(code: "too_short", template: "At least {min} characters.", params: { min: 12 }, field: "password") }
+  describe "MSG-1 — an entry needs a template and its params; everything around it is the framework's" do
+    let(:entry) do
+      Langsys::Messages.entry(template: "The password field must be at least {min} characters.", params: { min: 12 },
+                              field: "user.password", code: "too_short")
+    end
 
-    it "renders the same entries from the default envelope and from a foreign one a resolver maps" do
-      default = Langsys::Messages.envelope([entry])
-      foreign = { "problems" => [{ "slug" => "too_short", "text" => entry["message"], "tpl" => entry["template"],
-                                   "args" => entry["params"], "path" => "password" }] }
-      mapper = lambda { |body|
-        body["problems"].map do |p|
-          { "field" => p["path"], "code" => p["slug"], "message" => p["text"], "template" => p["tpl"],
-            "params" => p["args"] }
+    it "attaches entries to a framework's native error body under a configurable key, leaving the body as it was" do
+      rails_body = { "errors" => { "password" => ["is too short (minimum is 12 characters)"] } }
+      laravel_body = { "message" => "The given data was invalid.", "errors" => { "password" => ["The password ..."] } }
+      [rails_body, laravel_body].each do |native|
+        attached = Langsys::Messages.attach(native, [entry], key: "langsys")
+        expect(attached.except("langsys")).to eq(native)
+        expect(Langsys::Messages.resolve(attached, key: "langsys")).to eq([entry])
+      end
+      expect(Langsys::Messages.attach(rails_body, [entry]).keys).to eq(%w[errors messages])
+    end
+
+    it "resolves a framework's native failures through a resolver the app supplies" do
+      native = { "errors" => { "password" => [{ "error" => "too_short", "count" => 12 }] } }
+      resolver = lambda do |body|
+        body["errors"].flat_map do |field, errors|
+          errors.map do |e|
+            { "template" => "The #{field} field must be at least {min} characters.",
+              "params" => { "min" => e["count"] }, "field" => field, "code" => e["error"] }
+          end
         end
-      }
-      expect(Langsys::Messages.resolve(default, key: "error.errors")).to eq([entry])
-      expect(Langsys::Messages.resolve(foreign, resolver: mapper)).to eq([entry])
-    end
-
-    it "ships the langsys default envelope" do
-      body = Langsys::Messages.envelope([entry])
-      expect(body["status"]).to be(false)
-      expect(body["error"]["errors"]).to eq([entry])
-    end
-  end
-
-  describe "MSG-2 — codes are for logic" do
-    it "carries the shared vocabulary in order" do
-      expect(Langsys::Messages::CODES).to eq(
-        %w[required invalid_type invalid_format invalid_option invalid_date not_found already_taken mismatch
-           too_short too_long too_small too_large too_few too_many not_allowed already_member not_member
-           already_owner expired not_available invalid]
+      end
+      expect(Langsys::Messages.resolve(native, resolver: resolver)).to eq(
+        [Langsys::Messages.entry(template: "The password field must be at least {min} characters.", params: { min: 12 },
+                                 field: "password", code: "too_short")]
       )
     end
 
-    it "picks the size code by the field's type" do
-      expect(Langsys::Messages.size_code(:string, :lower)).to eq("too_short")
-      expect(Langsys::Messages.size_code(:string, :upper)).to eq("too_long")
-      expect(Langsys::Messages.size_code(:number, :lower)).to eq("too_small")
-      expect(Langsys::Messages.size_code(:number, :upper)).to eq("too_large")
-      expect(Langsys::Messages.size_code(:list, :lower)).to eq("too_few")
-      expect(Langsys::Messages.size_code(:list, :upper)).to eq("too_many")
+    it "resolves renamed pieces through configuration" do
+      foreign = { "failures" => [{ "sentence" => entry["template"], "values" => entry["params"],
+                                   "text" => entry["message"], "path" => "user.password", "rule" => "too_short" }] }
+      names = { "template" => "sentence", "params" => "values", "message" => "text", "field" => "path",
+                "code" => "rule" }
+      expect(Langsys::Messages.resolve(foreign, key: "failures", names: names)).to eq([entry])
     end
 
-    it "refuses a code that is not a snake_case slug" do
-      expect { Langsys::Messages.entry(code: "TooShort", template: "x") }.to raise_error(ArgumentError)
+    it "needs only a template and its params: message is the filled template, and code and field are optional" do
+      bare = Langsys::Messages.entry(template: "At least {min} characters.", params: { min: 3 })
+      expect(bare).to eq("template" => "At least {min} characters.", "params" => { "min" => 3 },
+                         "message" => "At least 3 characters.")
     end
 
-    it "carries the same code in two locales and after a wording change" do
-      a = Langsys::Messages.entry(code: "required", template: "The name is required.")
-      b = Langsys::Messages.entry(code: "required", template: "A name is required.")
-      expect([a["code"], b["code"]]).to eq(%w[required required])
+    it "resolves an entry that carries only a template and its params, filling message as the fallback" do
+      body = { "messages" => [{ "template" => "At least {min} characters.", "params" => { "min" => 3 } }] }
+      expect(Langsys::Messages.resolve(body, key: "messages")).to eq(
+        [{ "template" => "At least {min} characters.", "params" => { "min" => 3 },
+           "message" => "At least 3 characters." }]
+      )
+    end
+
+    it "does not look up an entry with no template; the client shows its message" do
+      expect(Langsys::Messages.resolve({ "errors" => [{ "message" => "Bad." }] })).to eq([])
+    end
+
+    it "ships no envelope of its own" do
+      expect(Langsys::Messages).not_to respond_to(:envelope)
     end
   end
 
-  describe "MSG-3/MSG-4 — whole sentences; params fill markers" do
-    it "keeps two per-value templates as two phrases under one code" do
-      a = Langsys::Messages.entry(code: "required", template: "The password is required.")
-      b = Langsys::Messages.entry(code: "required", template: "The name is required.")
+  describe "MSG-2 — a code is the framework's own" do
+    it "passes the framework's identifier through unchanged, whatever its shape" do
+      ["blank", "too_short", "Illuminate\\Validation\\Rules\\Password", "value_error.missing"].each do |code|
+        expect(Langsys::Messages.entry(template: "x", code: code)["code"]).to eq(code)
+      end
+    end
+
+    it "carries no code when the framework has none" do
+      expect(Langsys::Messages.entry(template: "x")).not_to have_key("code")
+    end
+
+    it "imposes no vocabulary and maps no rule to a code" do
+      expect(Langsys::Messages.constants).not_to include(:CODES, :SIZE_CODES)
+      expect(Langsys::Messages).not_to respond_to(:size_code)
+    end
+  end
+
+  describe "MSG-3/MSG-4/MSG-9 — the framework's own sentence, params fill markers" do
+    it "keeps two fields failing one rule as two templates" do
+      a = Langsys::Messages.entry(template: "Password can't be blank", code: "blank", field: "password")
+      b = Langsys::Messages.entry(template: "Name can't be blank", code: "blank", field: "name")
       expect(a["template"]).not_to eq(b["template"])
     end
 
     it "omits params and equals its message when the template has no marker" do
-      e = Langsys::Messages.entry(code: "mismatch", template: "The password confirmation does not match.",
-                                  params: { x: 1 })
+      e = Langsys::Messages.entry(template: "The password confirmation does not match.", params: { x: 1 })
       expect(e).not_to have_key("params")
       expect(e["message"]).to eq(e["template"])
     end
 
     it "sends a numeric param as a JSON number" do
-      e = Langsys::Messages.entry(code: "too_short", template: "At least {min} characters.", params: { min: 12 })
+      e = Langsys::Messages.entry(template: "At least {min} characters.", params: { min: 12 })
       expect(JSON.generate(e)).to include('"params":{"min":12}')
     end
 
-    it "builds a text-only failure as code invalid with its text as the template (MSG-9 piece)" do
+    it "registers a text-only failure as its text, with no params and no code" do
       expect(Langsys::Messages.from_text("Something went wrong.")).to eq(
-        "code" => "invalid", "message" => "Something went wrong.", "template" => "Something went wrong."
+        "template" => "Something went wrong.", "message" => "Something went wrong."
       )
     end
   end
@@ -137,26 +167,23 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
   describe "MSG-11 — the two checks a server SDK can make" do
     let(:catalog) { Langsys::Messages::TemplateCatalog.new }
 
-    %w[attribute field label other values].each do |name|
-      it "refuses a template whose marker {#{name}} carries a label" do
-        catalog.add("The {#{name}} is required.", source: "UserForm", field: "email")
+    ["%{attribute} is too short", "%{model} is invalid", "The %<attribute>s field is required."].each do |template|
+      it "refuses #{template.inspect}: Rails' own label placeholder, where the label should be written in" do
+        catalog.add(template, source: "User", field: "name")
         expect(catalog.templates).to be_empty
-        expect(catalog.problems.first).to include(source: "UserForm", field: "email")
-        expect(catalog.problems.first[:issue]).to include("{#{name}}")
+        expect(catalog.problems.first).to include(source: "User", field: "name")
       end
     end
 
-    ["The :attribute is required.", "The {{field}} is required.", "Size must be {min, number}."].each do |template|
-      it "refuses #{template.inspect}: a framework placeholder or a brace that is not a marker" do
-        catalog.add(template, source: "S")
-        expect(catalog.templates).to be_empty
-        expect(catalog.problems.size).to eq(1)
-      end
+    it "refuses the placeholders a binding names for its framework" do
+      laravel = Langsys::Messages::TemplateCatalog.new(label_placeholders: [":attribute", ":other", ":values"])
+      laravel.add("The :attribute field is required.", source: "S")
+      expect([laravel.templates, laravel.problems.size]).to eq([[], 1])
     end
 
-    it "accepts a numeric marker, and colons that are not placeholders" do
-      catalog.add("At least {min} characters, by 10:30 via https://x.test.", source: "S")
-      expect(catalog.templates).to eq(["At least {min} characters, by 10:30 via https://x.test."])
+    it "accepts the framework's sentence with the label written in and a {count} marker" do
+      catalog.add("Password is too short (minimum is {count} characters)", source: "S")
+      expect(catalog.templates).to eq(["Password is too short (minimum is {count} characters)"])
       expect(catalog.problems).to be_empty
     end
 
@@ -165,48 +192,40 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
       stub_authorize
       stub_translations("en-us", { "Errors" => {}, "Status" => { "Shipped" => nil } })
       client = build_client(logger: Logger.new(log).tap { |l| l.level = Logger::WARN })
-      3.times do
-        client.emit_message(code: "invalid", template: "The order is {status}.", params: { status: "Shipped" })
-      end
-      client.emit_message(code: "invalid", template: "The order is {status}.", params: { status: "A-1234" })
+      3.times { client.emit_message(template: "The order is {status}.", params: { status: "Shipped" }) }
+      client.emit_message(template: "The order is {status}.", params: { status: "A-1234" })
       expect(log.string.lines.grep(/catalogued phrase/).size).to eq(1)
     end
   end
 
-  describe "MSG-7 — the listing command" do
+  describe "MSG-7/MSG-10 — the listing command reports, and fails only under strict" do
     let(:out) { StringIO.new }
 
     def source(name, templates)
       Langsys::Messages::Source.new(name) { |cat| templates.each { |t, f| cat.add(t, field: f) } }
     end
 
-    it "lists every template and exits 0 when there are no problems" do
-      code = Langsys::Messages::Command.run(sources: [source("Signup", [["The email is required.", "email"]])],
-                                            out: out)
+    it "lists every template and exits 0" do
+      code = Langsys::Messages::Command.run(sources: [source("Signup", [["Email can't be blank", "email"]])], out: out)
       expect(code).to eq(0)
-      expect(out.string).to include("The email is required.")
+      expect(out.string).to include("Email can't be blank")
     end
 
-    it "records a problem that is not a bad template, and exits non-zero naming it (MSG-10's unlabelled field)" do
-      catalog = Langsys::Messages::TemplateCatalog.new
-      catalog.problem(source: "User", field: "cc_number", issue: "validated field has no label", fix: "declare one")
-      expect(catalog.problems).to eq([{ source: "User", field: "cc_number", issue: "validated field has no label",
-                                        fix: "declare one" }])
+    it "reports a message it cannot list with an actionable line, exiting 0, and 1 under strict" do
       src = Langsys::Messages::Source.new("Signup") do |c|
-        c.add("The email is required.", field: "email")
-        c.problem(field: "coupon", issue: "custom validator with no declared template", fix: "declare its templates")
+        c.problem(field: "coupon", issue: "message built at runtime", fix: "declare it as a translatable message")
       end
-      code = Langsys::Messages::Command.run(sources: [src], out: out)
-      expect(code).to eq(1)
-      expect(out.string)
-        .to include("✗ Signup.coupon: custom validator with no declared template — declare its templates")
+      expect(Langsys::Messages::Command.run(sources: [src], out: out)).to eq(0)
+      expect(out.string).to include("Signup.coupon: message built at runtime — declare it as a translatable message")
+      expect(Langsys::Messages::Command.run(sources: [src], out: StringIO.new, strict: true)).to eq(1)
     end
 
-    it "exits non-zero naming the source, the field and the fix" do
-      code = Langsys::Messages::Command.run(sources: [source("Signup", [["The :attribute is required.", "email"]])],
-                                            out: out)
-      expect(code).to eq(1)
-      expect(out.string).to match(/Signup.*email.*:attribute/)
+    it "names a validated field with no declared label as advice, never failing, even under strict" do
+      src = Langsys::Messages::Source.new("User") do |c|
+        c.problem(field: "cc_number", issue: "no declared label", fix: "declare one", advice: true)
+      end
+      expect(Langsys::Messages::Command.run(sources: [src], out: out, strict: true)).to eq(0)
+      expect(out.string).to include("User.cc_number: no declared label")
     end
   end
 
@@ -214,23 +233,22 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
     require "tmpdir"
     require "open3"
 
-    def run_cli(body)
+    def run_cli(body, *flags)
       Dir.mktmpdir do |dir|
         file = File.join(dir, "messages.rb")
         File.write(file, body)
         exe = File.expand_path("../exe/langsys-messages", __dir__)
-        Open3.capture2e("ruby", "-I", File.expand_path("../lib", __dir__), exe, file)
+        Open3.capture2e("ruby", "-I", File.expand_path("../lib", __dir__), exe, *flags, file)
       end
     end
 
-    it "exits 0 on a clean declaration and 1 on a problem, naming it" do
-      clean = 'Langsys::Messages.sources << Langsys::Messages::Source.new("A") { |c| c.add("The name is required.") }'
-      dirty = 'Langsys::Messages.sources << Langsys::Messages::Source.new("B") ' \
-              '{ |c| c.add("The {field} is bad.", field: "x") }'
-      out, status = run_cli(clean)
-      expect([status.exitstatus, out]).to match([0, /The name is required/])
-      out, status = run_cli(dirty)
-      expect([status.exitstatus, out]).to match([1, /B\.x: marker \{field\} carries a label/])
+    it "exits 0 when it reports a problem, and 1 with --strict" do
+      body = 'Langsys::Messages.sources << Langsys::Messages::Source.new("B") ' \
+             '{ |c| c.add("%{attribute} is bad", field: "x") }'
+      out, status = run_cli(body)
+      expect([status.exitstatus, out]).to match([0, /B\.x: .*%\{attribute\}/])
+      _, strict = run_cli(body, "--strict")
+      expect(strict.exitstatus).to eq(1)
     end
   end
 
@@ -243,7 +261,7 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
                                { "key" => "r", "project" => "proj-c", "type" => "read" }])
     end
 
-    let(:entry) { Langsys::Messages.entry(code: "required", template: "The email is required.", field: "email") }
+    let(:entry) { Langsys::Messages.entry(template: "The email is required.", field: "email") }
 
     it "MSG-6: renders under the configured category and misses under another" do
       found = contract_client(key: "r", base_locale: "es-ES")
@@ -255,7 +273,7 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
     it "MSG-8: registers an unlisted template after the response, never before, under Errors" do
       client = contract_client(key: "w")
       scope = client.begin_request_scope
-      client.emit_message(code: "too_short", template: "At least {min} characters.", params: { min: 8 })
+      client.emit_message(template: "At least {min} characters.", params: { min: 8 })
       client.flush_pending
       expect(contract.phrases("proj-c").keys).not_to include(["Errors", "At least {min} characters."])
       client.end_request_scope(scope)
@@ -265,7 +283,7 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
 
     it "MSG-8: a read key registers nothing" do
       client = contract_client(key: "r")
-      client.request_scope { client.emit_message(code: "invalid", template: "Nope {n}.", params: { n: 1 }) }
+      client.request_scope { client.emit_message(template: "Nope {n}.", params: { n: 1 }) }
       client.flush_pending
       expect(contract.phrases("proj-c").keys).not_to include(["Errors", "Nope {n}."])
     end
@@ -284,3 +302,4 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
     end
   end
 end
+# rubocop:enable Style/FormatStringToken
