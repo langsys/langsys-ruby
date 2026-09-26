@@ -47,7 +47,7 @@ module Langsys
       result = { "template" => template.to_s }
       result["params"] = kept unless names.empty?
       result["message"] = fill(template, kept)
-      result["field"] = field.to_s unless field.nil? || field.to_s.empty?
+      result["field"] = field unless field.nil? || field == ""
       result["code"] = code unless code.nil?
       result
     end
@@ -62,14 +62,15 @@ module Langsys
       body.merge(key.to_s => entries)
     end
 
-    # MSG-1: every entry in +body+, in document order. +key+ narrows the search to a dotted path,
-    # +names+ maps renamed pieces, and +resolver+ maps an app's native failures to entries instead.
+    # MSG-1: every entry in +body+, in document order, read without changing the body. +key+ is
+    # the dotted path the server attached them under, and only that part of the body is read;
+    # +pieces+ maps renamed pieces; +resolver+ maps an app's native failures to entries instead.
     # An entry's own params are never searched.
-    def resolve(body, key: nil, resolver: nil, names: {})
-      return Array(resolver.call(body)).filter_map { |candidate| normalize(candidate, names) } if resolver
+    def resolve(body, key: nil, resolver: nil, pieces: {})
+      return Array(resolver.call(body)).filter_map { |candidate| normalize(candidate, pieces) } if resolver
 
       node = key.nil? ? body : dig(body, key)
-      node.nil? ? [] : collect(node, names, [])
+      node.nil? ? [] : collect(node, pieces, [])
     end
 
     def dig(body, key)
@@ -94,24 +95,28 @@ module Langsys
       out
     end
 
-    # An entry is an object with a string template beside a message or params; anything else is
-    # not looked up (a client shows its message).
-    def normalize(candidate, names = {})
+    # An entry is an object with a string template or a string message, in the SDK's piece names.
+    # One with no template is not looked up: a client shows its message. The field and code pass
+    # through as the framework wrote them, an array path included.
+    def normalize(candidate, pieces = {})
       return nil unless candidate.is_a?(Hash)
 
-      read = ->(piece) { candidate[names.fetch(piece, piece)] || candidate[names.fetch(piece, piece).to_sym] }
+      read = ->(piece) { candidate[pieces.fetch(piece, piece)] || candidate[pieces.fetch(piece, piece).to_sym] }
       template = read.call("template")
       message = read.call("message")
-      params = read.call("params")
-      return nil unless template.is_a?(String) && (message.is_a?(String) || params.is_a?(Hash))
+      return nil unless template.is_a?(String) || message.is_a?(String)
 
-      result = { "template" => template }
-      result["params"] = params unless params.nil?
-      result["message"] = message.is_a?(String) ? message : fill(template, params)
+      result = {}
       field = read.call("field")
-      result["field"] = field if field.is_a?(String) && !field.empty?
+      result["field"] = field unless field.nil? || field == ""
       code = read.call("code")
       result["code"] = code unless code.nil?
+      params = read.call("params")
+      if template.is_a?(String)
+        result["template"] = template
+        result["params"] = params unless params.nil?
+      end
+      result["message"] = message.is_a?(String) ? message : fill(template, params)
       result
     end
 

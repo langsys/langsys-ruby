@@ -9,7 +9,7 @@ require "stringio"
 require_relative "support/contract_fixture"
 
 module MessageVectors
-  BLOB = "c8125549cfee0f5286f79a8cbc194cd30ccd446e"
+  BLOB = "7333e3919dac43af81c6c20bfdba974efd79725b"
   PATH = File.expand_path("fixtures/server-message-vectors.json", __dir__)
   DATA = JSON.parse(File.read(PATH))
 end
@@ -34,7 +34,11 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
 
     MessageVectors::DATA["resolve"].each do |row|
       it "resolve: #{row['id']}" do
-        expect(Langsys::Messages.resolve(row["body"], key: row["key"])).to eq(row["expected"])
+        options = row["options"] || {}
+        before = Marshal.load(Marshal.dump(row["body"]))
+        resolved = Langsys::Messages.resolve(row["body"], key: options["key"], pieces: options["pieces"] || {})
+        expect(resolved).to eq(row["expected"])
+        expect(row["body"]).to eq(before)
       end
     end
 
@@ -52,8 +56,11 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
     end
 
     MessageVectors::DATA["canonical_entries"].each do |entry|
-      it "canonical entry #{entry['code']}: message is the filled template (MSG-4)" do
+      it "canonical entry #{entry['framework'][/\A\S+/]} #{entry['code']}: fill, code and field" do
         expect(Langsys::Messages.fill(entry["template"], entry["params"] || {})).to eq(entry["message"])
+        built = Langsys::Messages.entry(template: entry["template"], params: entry["params"], field: entry["field"],
+                                        code: entry["code"])
+        expect(built).to eq(entry.except("framework", "source"))
       end
     end
   end
@@ -96,7 +103,7 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
                                    "text" => entry["message"], "path" => "user.password", "rule" => "too_short" }] }
       names = { "template" => "sentence", "params" => "values", "message" => "text", "field" => "path",
                 "code" => "rule" }
-      expect(Langsys::Messages.resolve(foreign, key: "failures", names: names)).to eq([entry])
+      expect(Langsys::Messages.resolve(foreign, key: "failures", pieces: names)).to eq([entry])
     end
 
     it "needs only a template and its params: message is the filled template, and code and field are optional" do
@@ -113,8 +120,9 @@ RSpec.describe "spec 8.2.x server messages (MSG)" do
       )
     end
 
-    it "does not look up an entry with no template; the client shows its message" do
-      expect(Langsys::Messages.resolve({ "errors" => [{ "message" => "Bad." }] })).to eq([])
+    it "resolves an entry with no template as its message alone, which a client shows without a lookup" do
+      expect(Langsys::Messages.resolve({ "errors" => [{ "message" => "Bad." }] },
+                                       key: "errors")).to eq([{ "message" => "Bad." }])
     end
 
     it "ships no envelope of its own" do

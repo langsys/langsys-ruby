@@ -318,7 +318,7 @@ module Langsys
     def self.entry: (template: String, ?params: Hash[untyped, untyped]?, ?field: String?, ?code: untyped) -> Hash[String, untyped]
     def self.from_text: (String) -> Hash[String, String]
     def self.attach: (Hash[String, untyped], Array[Hash[String, untyped]], ?key: String | Symbol) -> Hash[String, untyped]
-    def self.resolve: (untyped, ?key: String?, ?resolver: (^(untyped) -> untyped)?, ?names: Hash[String, String]) -> Array[Hash[String, untyped]]
+    def self.resolve: (untyped, ?key: String?, ?resolver: (^(untyped) -> untyped)?, ?pieces: Hash[String, String]) -> Array[Hash[String, untyped]]
     def self.dig: (untyped, String) -> untyped
     def self.collect: (untyped, Hash[String, String], Array[Hash[String, untyped]]) -> Array[Hash[String, untyped]]
     def self.normalize: (untyped, ?Hash[String, String]) -> Hash[String, untyped]?
