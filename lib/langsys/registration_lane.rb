@@ -69,7 +69,13 @@ module Langsys
     # not happen — a skipped write reports +success: false+ with a reason, because a caller
     # that correctly checks the return value must not be told it worked.
     def flush_pending(refresh: false, ignore_backoff: false, release_all: false)
-      return empty_result(success: true) unless @discovery.pending?
+      unless @discovery.pending?
+        # REG-10: nothing was queued because the catalog could not be read, so a miss could not
+        # be decided (WIRE-4). That is a skipped write, and it says so.
+        return empty_result(success: false, reason: "catalog_unavailable") if @catalog.unavailable?(effective_locale)
+
+        return empty_result(success: true)
+      end
 
       # REG-7: exactly one send in flight. A second caller is told so rather than being
       # handed a success it did not earn.

@@ -169,6 +169,27 @@ RSpec.describe "contract rows (spec 8.2.12)", contract: true do
     end
   end
 
+  describe "REG-10 — a skipped write names its reason (8.2.20)" do
+    it "names the unavailable catalog when the first catalog fetch failed" do
+      world(faults: [{ "method" => "GET", "path" => "/translations", "times" => 1, "status" => 500 }])
+      sdk = contract_client(key: "w")
+      sdk.t("Unseen", category: "UI")
+      expect(sdk.flush_pending).to include("success" => false, "reason" => "catalog_unavailable")
+      expect(stored).to be_empty
+    end
+
+    it "names not write-enabled, distinct from a failed send, and reports success when the double accepts" do
+      world
+      reader = contract_client(key: "r")
+      reader.t("Read only", category: "UI")
+      expect(reader.flush_pending).to include("success" => false, "reason" => "not_write_enabled")
+      writer = contract_client(key: "w")
+      writer.t("Written", category: "UI")
+      expect(writer.flush_pending["success"]).to be(true)
+      expect(contract_client(key: "r").get_translations["UI"]).to have_key("Written")
+    end
+  end
+
   describe "WIRE-2 — an empty success response" do
     it "treats a 204 with no body as success" do
       world(faults: [{ "method" => "POST", "path" => "/translatable-items", "times" => 1, "status" => 204 }])

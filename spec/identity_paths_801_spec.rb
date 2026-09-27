@@ -72,12 +72,15 @@ RSpec.describe "spec 8.0.1 identity on every path" do
 
   describe "declaration, opt-out and identity on the content-block attribute" do
     %w[data-ls-contentblock data-langsys-contentblock].each do |attr|
-      it "leaves a #{attr} identity value whole: no registration, no re-stamp" do
+      it "keeps a #{attr} identity value whole: not re-stamped, and its content registered under that id" do
         client, out = page_render(%(<div #{attr}="deadbeef"><p>One</p><p>Two</p></div><p>Kept</p>))
         host = Nokogiri::HTML(out).at_css("div")
         expect(host[attr]).to eq("deadbeef")
         expect(host["data-ls-contentblock"]).to eq(attr == "data-ls-contentblock" ? "deadbeef" : nil)
-        expect(queued_tokens(client)).to eq(["Kept"])
+        expect(client.pending_phrases.map { |p| p["phrase"] }).to eq(["Kept"])
+        expect(client.pending_content_blocks.map do |b|
+          [b["custom_id"], b["phrases"]]
+        end).to eq([["deadbeef", %w[One Two]]])
       end
 
       ["0", "false", " FALSE "].each do |value|

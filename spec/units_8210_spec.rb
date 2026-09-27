@@ -115,7 +115,7 @@ RSpec.describe "spec 8.2.10 units and markers" do
       end
 
       %w[abc123 on off no].each do |value|
-        it "#{attr}=#{value.inspect} is an identity: nothing registered, catalog entry rendered" do
+        it "#{attr}=#{value.inspect} is an identity: the catalog entry under it renders, and nothing registers" do
           data = { Langsys::UNCATEGORIZED => { value => { "Welcome" => "Bienvenido" } } }
           client, out = page(%(<section #{attr}="#{value}"><b>Welcome</b></section>), data)
           expect([phrases(client), blocks(client)]).to eq([[], []])
@@ -123,13 +123,36 @@ RSpec.describe "spec 8.2.10 units and markers" do
           expect(Nokogiri::HTML(out).at_css("section")[attr]).to eq(value)
         end
 
-        it "#{attr}=#{value.inspect} with no catalog entry renders its source" do
-          client, out = page(%(<section #{attr}="#{value}"><b>Welcome</b></section>))
-          expect([phrases(client), blocks(client)]).to eq([[], []])
+        it "#{attr}=#{value.inspect} outside a resolved scope, with the catalog lacking it, registers under that id" do
+          client, out = page(%(<section #{attr}="#{value}"><b>Welcome</b> <i>home</i></section>))
+          expect(phrases(client)).to eq([])
+          expect(client.pending_content_blocks.map { |b| [b["custom_id"], b["phrases"]] })
+            .to eq([[value, %w[Welcome home]]])
           expect(Nokogiri::HTML(out).at_css("b").text).to eq("Welcome")
+        end
+
+        it "#{attr}=#{value.inspect} with data-ls-resolved on the host registers nothing and renders the entry" do
+          data = { Langsys::UNCATEGORIZED => { value => { "Welcome" => "Bienvenido" } } }
+          client, out = page(%(<section #{attr}="#{value}" data-ls-resolved="es-es"><b>Welcome</b></section>), data)
+          expect([phrases(client), blocks(client)]).to eq([[], []])
+          expect(Nokogiri::HTML(out).at_css("b").text).to eq("Bienvenido")
+        end
+
+        it "#{attr}=#{value.inspect} with data-ls-resolved only on an ancestor registers nothing, even with no entry" do
+          client, = page(%(<div data-langsys-resolved><section #{attr}="#{value}"><b>Welcome</b></section></div>))
+          expect([phrases(client), blocks(client)]).to eq([[], []])
         end
       end
     end
+  end
+
+  it "MARK-3/REG-13: an identity outside a resolved scope registers nothing when the catalog could not be read" do
+    stub_authorize(key_type: "write", write_enabled: true)
+    stub_request(:get, %r{/api/translations}).to_return(status: 500, body: "")
+    client = build_client
+    client.set_locale("es-ES")
+    client.translate_page('<html><body><section data-ls-contentblock="abc123"><b>Welcome</b></section></body></html>')
+    expect(client.pending_content_blocks).to be_empty
   end
 
   describe "MARK-4 — a marked host inside a walked unit is excised" do

@@ -40,7 +40,11 @@ RSpec.describe "spec 8.0.1 register/lookup pairs and identity excision" do
       it "excises a nested #{attr} identity host from a declared block on the page path" do
         inner = %(<b>Welcome</b> <div #{attr}="deadbeef"><span>Owned</span></div> <em>friend</em>)
         client, out = page_render(%(<section data-ls-contentblock="1">#{inner}</section>))
-        expect(client.pending_content_blocks.map { |b| b["phrases"] }).to eq([%w[Welcome friend]])
+        # Excised from the outer block either way (MARK-4); outside a resolved scope the identity
+        # registers its own content under its id (MARK-3, 8.2.20).
+        outer = Langsys.generate_custom_id(Langsys::UNCATEGORIZED, %w[Welcome friend])
+        expect(client.pending_content_blocks.map { |b| [b["custom_id"], b["phrases"]] })
+          .to contain_exactly([outer, %w[Welcome friend]], ["deadbeef", %w[Owned]])
         expect(Nokogiri::HTML(out).at_css("div")[attr]).to eq("deadbeef")
       end
 

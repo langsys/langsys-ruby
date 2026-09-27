@@ -53,12 +53,15 @@ module Langsys
         resolve_text(text, category, params, effective_locale(locale), record: record)
       end
 
-      # Internal: the catalog entry stored under a stamped id (MARK-3 identity), or nil.
-      def catalog_block(category, custom_id, locale: nil)
+      # Internal: [the catalog entry stored under a stamped id (MARK-3 identity) or nil, whether
+      # the catalog answered]. A miss is only a miss against a catalog that loaded (REG-13).
+      def identity_block(category, custom_id, locale: nil)
         catalog = @catalog.get(effective_locale(locale))
-        entries = catalog && catalog[category || UNCATEGORIZED]
+        return [nil, false] if catalog.nil?
+
+        entries = catalog[category || UNCATEGORIZED]
         block = entries.is_a?(Hash) ? entries[custom_id] : nil
-        block.is_a?(Hash) ? block : nil
+        [block.is_a?(Hash) ? block : nil, true]
       end
 
       # SRV-6 against this project's locales (base and targets, from authorization).

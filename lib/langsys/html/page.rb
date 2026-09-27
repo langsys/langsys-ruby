@@ -260,11 +260,19 @@ module Langsys
         [element] + element.element_children.reject { |c| Html.marked_host?(c) }.flat_map { |c| own_elements(c) }
       end
 
-      # MARK-3: an identity host renders from the catalog entry under its id, or keeps its
-      # source when there is none, and registers nothing.
+      # MARK-3: an identity host renders from the catalog entry under its id. Inside a resolved
+      # scope it registers nothing: a server already rendered it from the catalog. Outside one the
+      # id is the block's own, so the host's content registers under it when the catalog lacks it.
       def render_identity(element, effective)
-        block = @client.catalog_block(item_category(effective), Html.block_identity(element), locale: @locale)
-        Html.apply_element(element, block, @attrs) if block
+        item_cat = item_category(effective)
+        custom_id = Html.block_identity(element)
+        block, available = @client.identity_block(item_cat, custom_id, locale: @locale)
+        return Html.apply_element(element, block, @attrs) if block
+        return unless available && record?(element)
+
+        inner = Html.inner_html(element)
+        phrases = Html.extract_phrases(inner, @attrs)
+        @client.queue_content_block(inner, item_cat, custom_id, phrases) unless phrases.empty?
       end
 
       def apply_or_queue_block(element, item_cat, phrases, inner, include_self: false)

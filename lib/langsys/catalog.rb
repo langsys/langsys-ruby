@@ -141,6 +141,9 @@ module Langsys
 
     def seed(locale) = @seeds[Locale.normalize_locale(locale)]
 
+    # Whether the last fetch for +locale+ failed and none has succeeded since (CACHE-2).
+    def unavailable?(locale) = @guard.synchronize { @failures.key?(Locale.normalize_locale(locale)) }
+
     # Whether the live catalog for +locale+ is in memory.
     def loaded?(locale) = @memory.key?(Locale.normalize_locale(locale))
 

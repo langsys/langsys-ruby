@@ -196,7 +196,7 @@ module Langsys
     def lookup_block: (String, Array[String]) -> [ String, Hash[String, untyped]?, bool ]
     def queue_content_block: (String, String, String, Array[String]) -> untyped
     def lookup_phrase: (String, ?category: String?, ?params: Hash[untyped, untyped]?, ?locale: String?, ?record: bool) -> String
-    def catalog_block: (String?, String, ?locale: String?) -> Hash[String, untyped]?
+    def identity_block: (String?, String, ?locale: String?) -> [Hash[String, untyped]?, bool]
     def project_base_locale: () -> String?
     def resolved_locale: (?String?) -> String?
     def catalog_data: (String) -> untyped
