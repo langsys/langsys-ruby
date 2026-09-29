@@ -15,6 +15,8 @@ module Langsys
   # * ICU MessageFormat (+{n, plural, …}+ / +select+ / +selectordinal+ /
   #   +{n, number|date|time}+) is handled by a small pure-Ruby parser backed by CLDR plural
   #   rules. Anything malformed degrades to simple interpolation instead of raising.
+  # * a missing (or +nil+) ICU argument recovers like the JS/PHP SDKs: +select+ takes its
+  #   +other+ branch, +plural+ takes +other+ with +#+ shown as +{name}+ (see +render_missing+).
   module Interpolate
     # Detection: an argument whose second token is a known ICU keyword. The trailing
     # +[,}]+ also matches style-less +{n, number}+.
@@ -115,10 +117,11 @@ module Langsys
 
     # -- ICU render -----------------------------------------------------------
 
-    def render(nodes, params, locale, plural_value, offset)
+    # +hash_text+, when given, replaces +#+ literally (a missing plural's +{name}+).
+    def render(nodes, params, locale, plural_value, offset, hash_text = nil)
       nodes.map do |node|
         if node.is_a?(String)
-          apply_hash(node, plural_value, offset, locale)
+          hash_text ? node.gsub("#", hash_text) : apply_hash(node, plural_value, offset, locale)
         else
           render_arg(node, params, locale)
         end
@@ -133,7 +136,7 @@ module Langsys
 
     def render_arg(arg, params, locale)
       found, value = fetch_param(params, arg.name)
-      return "{#{arg.name}}" if !found || value.nil?
+      return render_missing(arg, params, locale) if !found || value.nil?
 
       case arg.kind
       when nil then format_value(value, locale)
@@ -141,6 +144,24 @@ module Langsys
       when "date", "time" then format_date(value, locale, arg.style || "medium")
       when "select" then render_select(arg, value, params, locale)
       else render_plural(arg, value, params, locale)
+      end
+    end
+
+    # Recover from an absent (or +nil+) argument, as langsys-js-typescript 0.6.4 and
+    # langsys-php 1.3.1 do. Reachable with no caller mistake: Langsys promotes a plain
+    # +{name}+ phrase to +{name_gender, select, …}+ in gendered target locales, and the app
+    # never passes +name_gender+. So +select+ takes its +other+ branch (a correct sentence
+    # for an unknown value), +plural+/+selectordinal+ take +other+ with +#+ shown as
+    # +{name}+ (the sentence survives with a visible gap), and anything else stays visible.
+    # A plural or select without an +other+ branch is malformed, so it stays visible too.
+    def render_missing(arg, params, locale)
+      other = arg.options && arg.options["other"]
+      return "{#{arg.name}}" if other.nil?
+
+      case arg.kind
+      when "select" then render(other, params, locale, nil, 0)
+      when "plural", "selectordinal" then render(other, params, locale, nil, 0, "{#{arg.name}}")
+      else "{#{arg.name}}"
       end
     end
 

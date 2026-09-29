@@ -11,7 +11,11 @@ All notable changes to this project are documented here. The format follows
 - Initial base SDK: `Langsys::Client` with catalog fetch + two-tier cache, phrase resolution
   (untranslated → source phrase), parameter interpolation with locale-aware CLDR formatting
   and an ICU MessageFormat subset (`plural` / `select` / `selectordinal` / `number` / `date`
-  / `time`).
+  / `time`). A missing or `nil` ICU argument recovers the same way as
+  langsys-js-typescript 0.6.4 and langsys-php 1.3.1, so a phrase Langsys promoted to
+  `{name_gender, select, …}` reads as a sentence when the app passes no gender: `select`
+  takes its `other` branch, `plural` takes `other` with `#` shown as `{name}`, and any other
+  slot stays visible as `{name}`.
 - Phrase discovery queue with write-gated `flush_pending`; explicit `register_phrases`,
   `register_content_block`, and `sync`; PHP-compatible content-block `custom_id` hashing.
 - Reference data: `countries`, `dial_codes`, `currencies`, `locales`, `locales_flat`,

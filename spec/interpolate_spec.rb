@@ -68,4 +68,48 @@ RSpec.describe Langsys::Interpolate do
   it "degrades malformed ICU to simple interpolation instead of raising" do
     expect(described_class.call("{n, plural, one {# unclosed", { n: 1 })).to be_a(String)
   end
+
+  # Same recovery as langsys-js-typescript 0.6.4 and langsys-php 1.3.1. Reachable with no
+  # caller mistake: Langsys promotes a plain "{username}" phrase to
+  # "{username_gender, select, …}" in gendered target locales, so the app never passes
+  # username_gender. It must read as a sentence, not as "{username_gender}".
+  describe "a missing ICU argument" do
+    let(:gendered) do
+      "{username_gender, select, female {{username} ha sido invitada} " \
+        "male {{username} ha sido invitado} other {{username} ha sido invitade}}"
+    end
+
+    it "takes the other branch of a select" do
+      expect(described_class.call(gendered, { username: "Ana" }, "es-ES")).to eq("Ana ha sido invitade")
+    end
+
+    it "treats nil as missing" do
+      expect(described_class.call(gendered, { username: "Ana", username_gender: nil }, "es-ES")).to eq("Ana ha sido invitade")
+    end
+
+    it "leaves a supplied select alone" do
+      expect(described_class.call(gendered, { username: "Ana", username_gender: "female" }, "es-ES")).to eq("Ana ha sido invitada")
+    end
+
+    it "takes the other branch of a plural, with # shown as the slot" do
+      phrase = "{count, plural, one {Tienes # mensaje nuevo.} other {Tienes # mensajes nuevos.}}"
+      expect(described_class.call(phrase, {}, "es-ES")).to eq("Tienes {count} mensajes nuevos.")
+      expect(described_class.call(phrase, { count: nil }, "es-ES")).to eq("Tienes {count} mensajes nuevos.")
+      expect(described_class.call(phrase, { count: 0 }, "es-ES")).to eq("Tienes 0 mensajes nuevos.")
+    end
+
+    it "keeps simple and number slots visible" do
+      expect(described_class.call("{n, number} por {who}, {g, select, other {ok}}", {}, "es-ES")).to eq("{n} por {who}, ok")
+    end
+
+    it "costs nothing inside a branch that isn't chosen" do
+      phrase = "{g, select, f {Ella} other {{n, plural, one {# amiga} other {# amigas}}}}"
+      expect(described_class.call(phrase, { g: "f" }, "es-ES")).to eq("Ella")
+      expect(described_class.call(phrase, {}, "es-ES")).to eq("{n} amigas")
+    end
+
+    it "leaves a select without an other branch visible" do
+      expect(described_class.call("{g, select, male {He} female {She}} won", {}, "en")).to eq("{g} won")
+    end
+  end
 end
